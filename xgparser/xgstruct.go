@@ -200,7 +200,7 @@ func (e *EngineStructDoubleAction) FromStream(r io.Reader) error {
 // EngineStructBestMoveRecord represents best move analysis
 type EngineStructBestMoveRecord struct {
 	Pos       [26]int8
-	Dice      [2]int8
+	Dice      [2]int32 // Fixed: was [2]int8, Python uses 2l (2 int32s)
 	Level     int32
 	Score     [2]int32
 	Cube      int32
