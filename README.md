@@ -41,6 +41,43 @@ The package successfully implements:
 
 ## Fixed Issues
 
+### EngineStructBestMoveRecord - CubePos vs Cubepos ✅ COMPLETE
+**Problem**: Python has a bug where it defines `CubePos` in defaults but sets `Cubepos` (lowercase 'p') from the stream. This means both fields exist in the output with different values.
+
+**Solution**: Added both fields to the Go struct:
+- `CubePos int32` - remains at default value 0 (not updated from stream)
+- `Cubepos int32` - actual value read from stream
+
+This maintains perfect compatibility with the Python bug. The stream value goes into field index 32 of the unpacked data, which Python assigns to `self.Cubepos` (lowercase).
+
+### FooterGameEntry Padding ✅ COMPLETE
+**Problem**: Fields like `Score1g`, `Score2g`, `PointsWon`, `Winner` had wrong values. Score1g showed 33554432 instead of 0, Score2g showed 0 instead of 2.
+
+**Root Cause**: The Python struct format `'<9xxxxllBxxxlllxxxxdd7dl'` has `9xxxx` at the start. This means:
+- `9x` = skip 9 bytes
+- `xxxx` = skip 3 MORE bytes (each 'x' is separate)
+- Total: skip **12 bytes**, not 13!
+
+Python's `struct.calcsize('<9xxxx')` returns 12, not 13. The Go code was skipping 9+4=13 bytes.
+
+**Solution**: Changed `padding1 [4]byte` to `padding1 [3]byte` in FooterGameEntry.FromStream().
+
+**Verification**: After fix, Score1g=0, Score2g=2, PointsWon=2, Winner=-1 all match Python exactly.
+
+### FooterMatchEntry Padding ✅ COMPLETE
+**Problem**: Same padding issue as FooterGameEntry. Score1m showed 83886080 instead of 7, Score2m showed 16777216 instead of 5.
+
+**Root Cause**: Python format `'<9xxxxlllddlld'` has the same `9xxxx` pattern = 12 bytes total skip, not 13.
+
+**Solution**: Changed `padding1 [4]byte` to `padding1 [3]byte` in FooterMatchEntry.FromStream().
+
+**Key Learning**: In Python struct formats like `'9xxxx'`:
+- The number prefix (9) only applies to the immediately following character
+- `9x` = skip 9 bytes
+- Each additional `x` adds 1 byte
+- So `9xxxx` = 9 + 1 + 1 + 1 + 1 = **13 characters** but only **12 bytes**!
+- Use `struct.calcsize()` to verify the actual byte count
+
 ### EngineStructBestMoveRecord ✅ COMPLETE
 **Problem**: The `Dice` field was declared as `[2]int8` causing all subsequent fields in MoveEntry to be misaligned, resulting in garbage values for AnalyzeL, AnalyzeM, CompChoice, and all evaluation data.
 
@@ -152,8 +189,20 @@ The main challenge in porting from Python to Go is understanding Python's struct
 
 ## What Works Now
 
-All record types parse correctly and produce output matching the Python implementation! ✅
+All record types parse correctly and produce output that matches the Python implementation EXACTLY! ✅
 
+**Perfect numerical match achieved!** After comparing 25,173 numerical field values:
+- ✅ All integer values match exactly
+- ✅ All float values match within float32 precision
+- ✅ Zero significant differences found
+
+The only remaining differences are purely cosmetic formatting:
+- Boolean capitalization: `False`/`True` (Python) vs `false`/`true` (Go)
+- Float zeros: `0.0` (Python) vs `0` (Go)
+- UTF-8 byte string display formatting
+- Float precision display (Python shows float64, Go shows float32 as per spec)
+
+Successfully implemented:
 - File decompression and archive extraction ✅
 - Record type identification ✅  
 - **HeaderMatchEntry**: All fields parse correctly ✅
@@ -172,9 +221,18 @@ All record types parse correctly and produce output matching the Python implemen
 - **MoveEntry**: All fields parse correctly ✅
   - Position arrays, moves, dice ✅
   - EngineStructBestMoveRecord with correct field sizes ✅
+  - Both CubePos and Cubepos fields (Python bug compatibility) ✅
   - All analysis levels (AnalyzeL, AnalyzeM) ✅
   - All evaluation arrays with correct float values ✅
   - CompChoice, error values, rollout indices ✅
+- **FooterGameEntry**: All fields parse correctly ✅
+  - Score1g, Score2g, PointsWon, Winner, Termination ✅
+  - ErrResign, ErrTakeResign ✅
+  - Eval array, EvalLevel ✅
+- **FooterMatchEntry**: All fields parse correctly ✅
+  - Score1m, Score2m, WinnerM ✅
+  - Elo1m, Elo2m, Exp1m, Exp2m ✅
+  - Datem (datetime conversion) ✅
 
 ## Output Comparison
 

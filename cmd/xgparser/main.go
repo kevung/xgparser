@@ -236,7 +236,7 @@ func printMoveEntry(m *xgparser.MoveEntry) {
 		fmt.Printf("               'Crawford': %d,\n", m.DataMoves.Crawford)
 		fmt.Printf("               'Cube': %d,\n", m.DataMoves.Cube)
 		fmt.Printf("               'CubePos': %d,\n", m.DataMoves.CubePos)
-		fmt.Printf("               'Cubepos': %d,\n", m.DataMoves.CubePos)
+		fmt.Printf("               'Cubepos': %d,\n", m.DataMoves.Cubepos)
 		fmt.Printf("               'Dice': (%d, %d),\n", m.DataMoves.Dice[0], m.DataMoves.Dice[1])
 
 		// Print Eval

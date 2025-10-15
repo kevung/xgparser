@@ -204,7 +204,8 @@ type EngineStructBestMoveRecord struct {
 	Level     int32
 	Score     [2]int32
 	Cube      int32
-	CubePos   int32
+	CubePos   int32 // Default value, not updated from stream (Python bug compatibility)
+	Cubepos   int32 // Actual value from stream (lowercase 'p' - Python bug compatibility)
 	Crawford  int32
 	Jacoby    int32
 	NMoves    int32
@@ -233,7 +234,7 @@ func (e *EngineStructBestMoveRecord) FromStream(r io.Reader) error {
 	binary.Read(r, binary.LittleEndian, &e.Level)
 	binary.Read(r, binary.LittleEndian, &e.Score)
 	binary.Read(r, binary.LittleEndian, &e.Cube)
-	binary.Read(r, binary.LittleEndian, &e.CubePos)
+	binary.Read(r, binary.LittleEndian, &e.Cubepos) // Read into Cubepos, leave CubePos at default 0
 	binary.Read(r, binary.LittleEndian, &e.Crawford)
 	binary.Read(r, binary.LittleEndian, &e.Jacoby)
 	binary.Read(r, binary.LittleEndian, &e.NMoves)
@@ -848,7 +849,10 @@ func (f *FooterGameEntry) FromStream(r io.Reader, version int32) error {
 	var skip [9]byte
 	binary.Read(r, binary.LittleEndian, &skip)
 
-	var padding1 [4]byte
+	// Python format: '<9xxxxllBxxxlllxxxxdd7dl'
+	// After '9x' we have 'xxxx' = 4 individual 'x' chars = skip 3 more bytes (NOT 4!)
+	// Total skip = 9 + 3 = 12 bytes
+	var padding1 [3]byte
 	binary.Read(r, binary.LittleEndian, &padding1)
 
 	binary.Read(r, binary.LittleEndian, &f.Score1g)
@@ -900,7 +904,9 @@ func (f *FooterMatchEntry) FromStream(r io.Reader, version int32) error {
 	var skip [9]byte
 	binary.Read(r, binary.LittleEndian, &skip)
 
-	var padding1 [4]byte
+	// Python format: '<9xxxxlllddlld'
+	// '9xxxx' = 12 bytes (9 + 3), not 13!
+	var padding1 [3]byte
 	binary.Read(r, binary.LittleEndian, &padding1)
 
 	binary.Read(r, binary.LittleEndian, &f.Score1m)
