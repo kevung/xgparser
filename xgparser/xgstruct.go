@@ -152,7 +152,7 @@ type EngineStructDoubleAction struct {
 	Cube          int32
 	CubePos       int32
 	Jacoby        int32
-	Crawford      int32
+	Crawford      int16 // Changed from int32 to int16
 	Met           int16
 	FlagDouble    int16
 	IsBeaver      int16
@@ -618,49 +618,65 @@ func (c *CubeEntry) FromStream(r io.Reader, version int32) error {
 	c.Doubled = &EngineStructDoubleAction{}
 	c.Doubled.FromStream(r)
 
+	// Python format: '<xxxxd3BxxxxxdlllxxxxddllbbxxxxxxddBxxxlBBBxlll'
+	// xxxx = 4 bytes padding
 	var padding3 [4]byte
 	binary.Read(r, binary.LittleEndian, &padding3)
 
+	// d = 8 bytes (double) → ErrCube
 	binary.Read(r, binary.LittleEndian, &c.ErrCube)
 
-	var diceBytes [3]byte
+	// 3B = 3 bytes → DiceRolled
+	var diceBytes [3]uint8
 	binary.Read(r, binary.LittleEndian, &diceBytes)
 	c.DiceRolled = DelphiShortStrToStr(diceBytes[:])
 
-	var padding4 byte
+	// xxxxx = 5 bytes padding
+	var padding4 [5]byte
 	binary.Read(r, binary.LittleEndian, &padding4)
 
-	var padding5 [5]byte
-	binary.Read(r, binary.LittleEndian, &padding5)
-
+	// d = 8 bytes → ErrTake
 	binary.Read(r, binary.LittleEndian, &c.ErrTake)
+
+	// lll = 12 bytes (3 int32s) → RolloutIndexD, CompChoiceD, AnalyzeC
 	binary.Read(r, binary.LittleEndian, &c.RolloutIndexD)
 	binary.Read(r, binary.LittleEndian, &c.CompChoiceD)
 	binary.Read(r, binary.LittleEndian, &c.AnalyzeC)
 
-	var padding6 [4]byte
-	binary.Read(r, binary.LittleEndian, &padding6)
+	// xxxx = 4 bytes padding
+	var padding5 [4]byte
+	binary.Read(r, binary.LittleEndian, &padding5)
 
+	// dd = 16 bytes → ErrBeaver, ErrRaccoon
 	binary.Read(r, binary.LittleEndian, &c.ErrBeaver)
 	binary.Read(r, binary.LittleEndian, &c.ErrRaccoon)
+
+	// ll = 8 bytes → AnalyzeCR, IsValid
 	binary.Read(r, binary.LittleEndian, &c.AnalyzeCR)
 	binary.Read(r, binary.LittleEndian, &c.IsValid)
+
+	// bb = 2 bytes → TutorCube, TutorTake
 	binary.Read(r, binary.LittleEndian, &c.TutorCube)
 	binary.Read(r, binary.LittleEndian, &c.TutorTake)
 
-	var padding7 [6]byte
-	binary.Read(r, binary.LittleEndian, &padding7)
+	// xxxxxx = 6 bytes padding
+	var padding6 [6]byte
+	binary.Read(r, binary.LittleEndian, &padding6)
 
+	// dd = 16 bytes → ErrTutorCube, ErrTutorTake
 	binary.Read(r, binary.LittleEndian, &c.ErrTutorCube)
 	binary.Read(r, binary.LittleEndian, &c.ErrTutorTake)
 
-	var flaggedDouble byte
+	// B = 1 byte → FlaggedDouble
+	var flaggedDouble uint8
 	binary.Read(r, binary.LittleEndian, &flaggedDouble)
 	c.FlaggedDouble = flaggedDouble != 0
 
-	var padding8 [3]byte
-	binary.Read(r, binary.LittleEndian, &padding8)
+	// xxx = 3 bytes padding
+	var padding7 [3]byte
+	binary.Read(r, binary.LittleEndian, &padding7)
 
+	// l = 4 bytes → CommentCube
 	binary.Read(r, binary.LittleEndian, &c.CommentCube)
 
 	if version >= 24 {

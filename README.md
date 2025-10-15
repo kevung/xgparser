@@ -67,18 +67,29 @@ The package successfully implements:
 - `xxx` means "skip 1 + skip 1 + skip 1" = skip 3 bytes
 - So `9xxxx` = 9 + 3 = **12 bytes** total
 
-### CubeEntry ⚠️ PARTIALLY FIXED
-**Progress**:
-- ✅ Fixed initial padding (9 + 3 = 12 bytes, not 13)
-- ✅ `ActiveP`: Now **-1** (was -16777217)
-- ✅ `Double`: Now **-2** (was -1)
-- ⚠️ Still wrong: `AnalyzeC`, `AnalyzeCR`, `CommentCube` fields in second part of struct
+### CubeEntry ✅ COMPLETE
+**Problem**: Several fields had wrong values, DiceRolled was empty, numeric fields showed garbage
+- `AnalyzeC`, `AnalyzeCR`, `CommentCube`: Were showing 65535 or 0 instead of -1
+- `CompChoiceD`: Was showing -65536 instead of 0
+- `DiceRolled`: Was empty instead of showing dice values like '43'
+- `ErrCube`, `ErrBeaver`: Were showing garbage float values instead of -1000.0
 
-**Next Steps**: The second part of CubeEntry parsing after `Doubled` needs padding fixes. Python format is:
-```
-'<xxxxd3BxxxxxdlllxxxxddllbbxxxxxxddBxxxlBBBxlll'
-```
-Need to carefully count each padding section.
+**Root Cause**: The EngineStructDoubleAction struct had `Crawford` defined as `int32` when it should be `int16`. The Python struct format `'<26bxxl2llllhhhh7ffffhh7f'` shows:
+- `l2lll` = 1 + 2 + 3 = **6 int32s** (Level, Score[2], Cube, CubePos, Jacoby)
+- `hhhh` = **4 int16s** (Crawford, met, FlagDouble, isBeaver)
+
+The Go code was reading Crawford as int32 (4 bytes) instead of int16 (2 bytes), causing a 2-byte misalignment for all subsequent fields in CubeEntry's second section.
+
+**Solution**: Changed `Crawford int32` to `Crawford int16` in EngineStructDoubleAction struct.
+
+**Key Learning**: In Python struct format strings, the number prefix only applies to the immediately following character. So `l2llll` is parsed as:
+- `l` = 1 int32
+- `2l` = 2 int32s  
+- `lll` = 3 int32s
+- Total: 6 int32s, NOT 7!
+
+### MoveEntry ⚠️ IN PROGRESS
+**Status**: CubeEntry is now fully working, but MoveEntry shows wrong values for AnalyzeL, AnalyzeM, CompChoice, and related fields. This suggests similar struct packing issues need to be fixed.
 
 ## Critical Learning: Python struct.unpack Padding Rules
 
