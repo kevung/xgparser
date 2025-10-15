@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/unger/xgparser/xgparser"
+	"github.com/kevung/xgparser/xgparser"
 )
 
 func main() {
