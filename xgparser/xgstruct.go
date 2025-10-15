@@ -295,7 +295,7 @@ type HeaderMatchEntry struct {
 	GameMode             int32
 	Imported             bool
 	SRound               string
-	Invert               int8
+	Invert               int32
 	Magic                uint32
 	MoneyInitG           int32
 	MoneyInitScore       [2]int32
@@ -517,7 +517,9 @@ func (h *HeaderGameEntry) FromStream(r io.Reader, version int32) error {
 	var skip [9]byte
 	binary.Read(r, binary.LittleEndian, &skip)
 
-	var padding1 [4]byte
+	// Python format: '<9xxxxllB26bxlBxxxlll'
+	// After 9 bytes, we have 4x (3 bytes padding here), then ll (Score1, Score2)
+	var padding1 [3]byte
 	binary.Read(r, binary.LittleEndian, &padding1)
 
 	binary.Read(r, binary.LittleEndian, &h.Score1)
@@ -594,10 +596,12 @@ func (c *CubeEntry) FromStream(r io.Reader, version int32) error {
 	c.EntryType = 2 // ENTRYTYPE_CUBE
 	c.Version = version
 
+	// Python format: '<9xxxxllllll26bxx'
+	// 9x + xxx = 9 + 3 = 12 bytes skip (NOT 13!)
 	var skip [9]byte
 	binary.Read(r, binary.LittleEndian, &skip)
 
-	var padding1 [4]byte
+	var padding1 [3]byte
 	binary.Read(r, binary.LittleEndian, &padding1)
 
 	binary.Read(r, binary.LittleEndian, &c.ActiveP)
