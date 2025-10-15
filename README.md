@@ -1,6 +1,25 @@
 # XGParser - Go Implementation
 
-This is a Go implementation of the Python xgdatatools package for parsing ExtremeGammon (.xg) files.
+A Go library for parsing ExtremeGammon (.xg) backgammon game files.
+
+## About
+
+This is a Go port of the Python [xgdatatools](https://github.com/oysteijo/xgdatatools) library originally created by Michael Petch. This Go implementation provides the same functionality for parsing and extracting data from ExtremeGammon (.xg) files.
+
+## License
+
+This library is licensed under the **GNU Lesser General Public License v2.1 (LGPL-2.1)**, the same license as the original Python xgdatatools library.
+
+### Credits
+
+- **Original Python library**: Michael Petch (Copyright © 2013-2014)
+  - Email: mpetch@gnubg.org
+  - GitHub: https://github.com/oysteijo/xgdatatools
+
+- **Go port**: Kevin Unger (Copyright © 2025)
+  - This is a transcoded version of the original Python library
+
+All credit for the original design and implementation goes to Michael Petch.
 
 ## Current Status - COMPLETE! ✅
 
