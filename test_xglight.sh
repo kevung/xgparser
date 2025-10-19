@@ -20,7 +20,7 @@ NC='\033[0m' # No Color
 # Test 1: Build all components
 echo "Test 1: Building all components..."
 go build -o xglight ./cmd/xglight/ 2>&1
-go build -o stats_example ./examples/stats_example.go 2>&1
+go build -o stats_example ./cmd/stats_example/ 2>&1
 echo -e "${GREEN}✓ Build successful${NC}"
 echo ""
 
