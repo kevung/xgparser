@@ -45,27 +45,31 @@ type Position struct {
 }
 
 // CheckerAnalysis contains analysis for a single checker move
+// Note: player1/player2 in analysis refer to the player on roll (active_player) and their opponent,
+// not the players in player1_name/player2_name metadata
 type CheckerAnalysis struct {
 	Position          Position `json:"position"`            // Resulting position
 	Move              [8]int8  `json:"move"`                // The move itself
-	Player1WinRate    float32  `json:"player1_win_rate"`    // eval[0]
-	Player1GammonRate float32  `json:"player1_gammon_rate"` // eval[1]
-	Player1BgRate     float32  `json:"player1_bg_rate"`     // eval[2]
-	Player2GammonRate float32  `json:"player2_gammon_rate"` // eval[3]
-	Player2BgRate     float32  `json:"player2_bg_rate"`     // eval[4]
-	Equity            float32  `json:"equity"`              // eval[5] - normalized equity
+	Player1WinRate    float32  `json:"player1_win_rate"`    // Win rate for player on roll (1 - eval[2])
+	Player1GammonRate float32  `json:"player1_gammon_rate"` // Gammon rate for player on roll (eval[4])
+	Player1BgRate     float32  `json:"player1_bg_rate"`     // Backgammon rate for player on roll (eval[5])
+	Player2GammonRate float32  `json:"player2_gammon_rate"` // Gammon rate for opponent (eval[1])
+	Player2BgRate     float32  `json:"player2_bg_rate"`     // Backgammon rate for opponent (eval[0])
+	Equity            float32  `json:"equity"`              // eval[6] - normalized equity
 	AnalysisDepth     int16    `json:"analysis_depth"`      // EvalLevel.Level
 }
 
 // CubeAnalysis contains analysis for a cube decision
+// Note: For cube decisions, eval is always from active player's perspective
+// player1 in analysis = player on roll, player2 = opponent (no swap needed)
 type CubeAnalysis struct {
-	Player1WinRate       float32 `json:"player1_win_rate"`        // eval[0]
-	Player1GammonRate    float32 `json:"player1_gammon_rate"`     // eval[1]
-	Player1BgRate        float32 `json:"player1_bg_rate"`         // eval[2]
-	Player2GammonRate    float32 `json:"player2_gammon_rate"`     // eval[3]
-	Player2BgRate        float32 `json:"player2_bg_rate"`         // eval[4]
-	CubelessNoDouble     float32 `json:"cubeless_no_double"`      // eval[5]
-	CubelessDouble       float32 `json:"cubeless_double"`         // eval[6]
+	Player1WinRate       float32 `json:"player1_win_rate"`        // Win rate for player on roll - eval[2]
+	Player1GammonRate    float32 `json:"player1_gammon_rate"`     // Gammon rate for player on roll - eval[1]
+	Player1BgRate        float32 `json:"player1_bg_rate"`         // Backgammon rate for player on roll - eval[0]
+	Player2GammonRate    float32 `json:"player2_gammon_rate"`     // Gammon rate for opponent - eval[4]
+	Player2BgRate        float32 `json:"player2_bg_rate"`         // Backgammon rate for opponent - eval[5]
+	CubelessNoDouble     float32 `json:"cubeless_no_double"`      // eval[6]
+	CubelessDouble       float32 `json:"cubeless_double"`         // eval[7] (if available)
 	CubefulNoDouble      float32 `json:"cubeful_no_double"`       // equB
 	CubefulDoubleTake    float32 `json:"cubeful_double_take"`     // equDouble
 	CubefulDoublePass    float32 `json:"cubeful_double_pass"`     // equDrop
@@ -157,11 +161,14 @@ func ParseXG(segments []*Segment) (*Match, error) {
 
 				case *CubeEntry:
 					if currentGame != nil {
-						cubeMove := convertCubeEntry(r)
-						currentGame.Moves = append(currentGame.Moves, Move{
-							MoveType: "cube",
-							CubeMove: cubeMove,
-						})
+						// Skip initial position cube entries (Double == -2) which don't represent actual cube decisions
+						if r.Double != -2 {
+							cubeMove := convertCubeEntry(r)
+							currentGame.Moves = append(currentGame.Moves, Move{
+								MoveType: "cube",
+								CubeMove: cubeMove,
+							})
+						}
 					}
 
 				case *MoveEntry:
@@ -276,33 +283,133 @@ func getPreferredString(preferred, fallback string) string {
 	return fallback
 }
 
+// swapPositionCheckers flips the board checkers from one player's perspective to the other
+// Index 0: opponent's bar, Index 1-24: board points, Index 25: player on roll's bar
+func swapPositionCheckers(pos [26]int8) [26]int8 {
+	var swapped [26]int8
+	// Swap bars: player's bar (index 25) becomes opponent's bar (index 0)
+	swapped[0] = -pos[25]
+	// Points 1-24 are reversed and negated (point 1 becomes point 24, etc.)
+	for i := 1; i <= 24; i++ {
+		swapped[i] = -pos[25-i]
+	}
+	// Opponent's bar (index 0) becomes player's bar (index 25)
+	swapped[25] = -pos[0]
+	return swapped
+}
+
+// swapPosition swaps a complete Position from one player's perspective to the other
+// This includes swapping checkers, score, and cube position
+func swapPosition(pos Position) Position {
+	return Position{
+		Checkers: swapPositionCheckers(pos.Checkers),
+		Cube:     pos.Cube,
+		CubePos:  -pos.CubePos,                         // Swap cube position: 1 becomes -1, -1 becomes 1, 0 stays 0
+		Score:    [2]int32{pos.Score[1], pos.Score[0]}, // Swap score array
+	}
+}
+
 // convertCubeEntry converts a full CubeEntry to CubeMove
 func convertCubeEntry(c *CubeEntry) *CubeMove {
+	// Build initial position
+	position := Position{
+		Checkers: c.Position,
+		Cube:     c.CubeB,
+		CubePos:  0,              // Default, could be extracted from more context
+		Score:    [2]int32{0, 0}, // Would need to track from game state
+	}
+
+	// Swap position to player on roll's perspective only when active_player == -1
+	if c.ActiveP == -1 {
+		position = swapPosition(position)
+	}
+
 	move := &CubeMove{
-		Position: Position{
-			Checkers: c.Position,
-			Cube:     c.CubeB,
-			CubePos:  0,              // Default, could be extracted from more context
-			Score:    [2]int32{0, 0}, // Would need to track from game state
-		},
+		Position:     position,
 		ActivePlayer: c.ActiveP,
 		CubeAction:   c.Double, // Simplified - may need more logic
 	}
 
 	// Add cube analysis if available
 	if c.Doubled != nil {
+		// For cube decisions, Eval is ALWAYS from the active player's perspective (player on roll)
+		// Eval[0] = opponent's backgammon rate
+		// Eval[1] = opponent's gammon rate
+		// Eval[2] = opponent's win rate
+		// Eval[4] = player on roll's gammon rate
+		// Eval[5] = player on roll's backgammon rate
+		// Eval[6] = cubeless equity
+		//
+		// player1 in our output = player on roll (active_player)
+		// player2 in our output = opponent
+		var p1Win, p1Gammon, p1Bg, p2Gammon, p2Bg float32
+
+		// XG's Eval[2] is opponent's win rate, so player on roll's win rate is 1 - Eval[2]
+		p1Win = 1.0 - c.Doubled.Eval[2] // Player on roll's win rate
+		p1Gammon = c.Doubled.Eval[4]    // Player on roll's gammon rate
+		p1Bg = c.Doubled.Eval[5]        // Player on roll's backgammon rate
+		p2Gammon = c.Doubled.Eval[1]    // Opponent's gammon rate
+		p2Bg = c.Doubled.Eval[0]        // Opponent's backgammon rate
+
+		// Wrong pass/take percentage: the probability threshold where making the wrong
+		// cube decision (take vs pass after double) results in the same equity as no double.
+		// Formula: p * equity_wrong + (1-p) * equity_right = equity_no_double
+		// Solving for p: p = (equity_no_double - equity_right) / (equity_wrong - equity_right)
+		// Only compute this when cubeful no double equity is the best (highest) equity
+		// Use -1.0 to indicate "not applicable" when no double is not the best equity
+		wrongPassTakePercent := float32(-1.0)
+
+		equNoDouble := c.Doubled.EquB
+		equDoubleTake := c.Doubled.EquDouble
+		equDoublePass := c.Doubled.EquDrop
+
+		// Check if no double is the best equity (highest value)
+		if equNoDouble >= equDoubleTake && equNoDouble >= equDoublePass {
+			// From the opponent's perspective after being doubled:
+			// - Taking gives them -equDoubleTake (negated)
+			// - Passing gives them -equDoublePass (negated)
+			// The correct decision is the one with higher equity for them (less negative)
+			// which means lower equity for us (the doubler)
+			var equRight, equWrong float32
+			if equDoubleTake < equDoublePass {
+				// Correct decision for opponent is take (better for them = worse for us = more negative)
+				// Wrong decision is pass (worse for them = better for us = more positive)
+				equRight = equDoubleTake
+				equWrong = equDoublePass
+			} else {
+				// Correct decision for opponent is pass
+				// Wrong decision is take
+				equRight = equDoublePass
+				equWrong = equDoubleTake
+			}
+
+			// Calculate the threshold probability
+			denominator := equWrong - equRight
+			if denominator != 0 {
+				p := (equNoDouble - equRight) / denominator
+				wrongPassTakePercent = p * 100.0 // Convert to percentage
+			} else {
+				wrongPassTakePercent = 0.0 // Edge case: equities are equal
+			}
+		}
+
+		// Cubeless double: compute as double the cubeless no-double equity
+		// The XG file format doesn't store this separately (despite Python struct suggesting 4 floats)
+		// Empirically, doubling the equity gives the correct value (~-0.008 for first cube)
+		cubelessDouble := c.Doubled.Eval[6] * 2.0
+
 		analysis := &CubeAnalysis{
-			Player1WinRate:       c.Doubled.Eval[0],
-			Player1GammonRate:    c.Doubled.Eval[1],
-			Player1BgRate:        c.Doubled.Eval[2],
-			Player2GammonRate:    c.Doubled.Eval[3],
-			Player2BgRate:        c.Doubled.Eval[4],
-			CubelessNoDouble:     c.Doubled.Eval[5],
-			CubelessDouble:       c.Doubled.Eval[6],
+			Player1WinRate:       p1Win,
+			Player1GammonRate:    p1Gammon,
+			Player1BgRate:        p1Bg,
+			Player2GammonRate:    p2Gammon,
+			Player2BgRate:        p2Bg,
+			CubelessNoDouble:     c.Doubled.Eval[6],
+			CubelessDouble:       cubelessDouble,
 			CubefulNoDouble:      c.Doubled.EquB,
 			CubefulDoubleTake:    c.Doubled.EquDouble,
 			CubefulDoublePass:    c.Doubled.EquDrop,
-			WrongPassTakePercent: 0, // Could be calculated from equity differences
+			WrongPassTakePercent: wrongPassTakePercent,
 			AnalysisDepth:        c.Doubled.Level,
 		}
 		move.Analysis = analysis
@@ -316,13 +423,21 @@ func convertCubeEntry(c *CubeEntry) *CubeMove {
 
 // convertMoveEntry converts a full MoveEntry to CheckerMove
 func convertMoveEntry(m *MoveEntry) *CheckerMove {
+	// Build initial position
+	position := Position{
+		Checkers: m.PositionI,
+		Cube:     m.CubeA,
+		CubePos:  0,              // Default
+		Score:    [2]int32{0, 0}, // Would need to track
+	}
+
+	// Swap position to player on roll's perspective only when active_player == -1
+	if m.ActiveP == -1 {
+		position = swapPosition(position)
+	}
+
 	move := &CheckerMove{
-		Position: Position{
-			Checkers: m.PositionI,
-			Cube:     m.CubeA,
-			CubePos:  0,              // Default
-			Score:    [2]int32{0, 0}, // Would need to track
-		},
+		Position:     position,
 		ActivePlayer: m.ActiveP,
 		Dice:         m.Dice,
 		PlayedMove:   m.Moves,
@@ -348,20 +463,22 @@ func convertMoveEntry(m *MoveEntry) *CheckerMove {
 				moveArray[j] = m.DataMoves.Moves[i][j]
 			}
 
+			analysisPosition := m.DataMoves.PosPlayed[i]
+
 			analysis := CheckerAnalysis{
 				Position: Position{
-					Checkers: m.DataMoves.PosPlayed[i],
+					Checkers: analysisPosition,
 					Cube:     m.DataMoves.Cube,
 					CubePos:  m.DataMoves.Cubepos,
 					Score:    m.DataMoves.Score,
 				},
 				Move:              moveArray,
-				Player1WinRate:    m.DataMoves.Eval[i][0],
-				Player1GammonRate: m.DataMoves.Eval[i][1],
-				Player1BgRate:     m.DataMoves.Eval[i][2],
-				Player2GammonRate: m.DataMoves.Eval[i][3],
-				Player2BgRate:     m.DataMoves.Eval[i][4],
-				Equity:            m.DataMoves.Eval[i][5],
+				Player1WinRate:    1.0 - m.DataMoves.Eval[i][2], // 1 - opponent win rate
+				Player1GammonRate: m.DataMoves.Eval[i][4],
+				Player1BgRate:     m.DataMoves.Eval[i][5],
+				Player2GammonRate: m.DataMoves.Eval[i][1],
+				Player2BgRate:     m.DataMoves.Eval[i][0],
+				Equity:            m.DataMoves.Eval[i][6],
 				AnalysisDepth:     m.DataMoves.EvalLevel[i].Level,
 			}
 			move.Analysis = append(move.Analysis, analysis)

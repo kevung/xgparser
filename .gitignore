@@ -1,29 +1,4 @@
+xglight
+xgparser
+xgparser_full
 tmp
-
-# Binaries
-xgparser/xgparser
-cmd/xglight/xglight
-cmd/stats_example/stats_example
-cmd/reader_example/reader_example
-cmd/web_example/web_example
-*.exe
-*.dll
-*.so
-*.dylib
-
-# Test binary
-*.test
-
-# Output files
-*.out
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
