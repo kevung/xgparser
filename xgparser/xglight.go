@@ -49,7 +49,7 @@ type Position struct {
 // not the players in player1_name/player2_name metadata
 type CheckerAnalysis struct {
 	Position          Position `json:"position"`            // Resulting position
-	Move              [8]int8  `json:"move"`                // The move itself
+	Move              [8]int8  `json:"move"`                // The move itself (25=bar, 1-24=points, -2=bear off, -1=unused)
 	Player1WinRate    float32  `json:"player1_win_rate"`    // Win rate for player on roll (1 - eval[2])
 	Player1GammonRate float32  `json:"player1_gammon_rate"` // Gammon rate for player on roll (eval[4])
 	Player1BgRate     float32  `json:"player1_bg_rate"`     // Backgammon rate for player on roll (eval[5])
@@ -82,7 +82,7 @@ type CheckerMove struct {
 	Position     Position          `json:"position"`      // Position before the move
 	ActivePlayer int32             `json:"active_player"` // Player making the move
 	Dice         [2]int32          `json:"dice"`          // Dice rolled
-	PlayedMove   [8]int32          `json:"played_move"`   // The move that was played
+	PlayedMove   [8]int32          `json:"played_move"`   // The move that was played (25=bar, 1-24=points, -2=bear off, -1=unused)
 	Analysis     []CheckerAnalysis `json:"analysis"`      // Analysis of possible moves
 }
 
@@ -436,11 +436,27 @@ func convertMoveEntry(m *MoveEntry) *CheckerMove {
 		position = swapPosition(position)
 	}
 
+	// Convert moves from XG internal format to desired output format
+	// XG internal: -1=unused, 0-23=points (0-based), 24=bar, -2=bear off
+	// We output: -1=unused, 1-24=points (1-based), 25=bar, -2=bear off
+	var playedMove [8]int32
+	for i := 0; i < 8; i++ {
+		if m.Moves[i] == -1 {
+			playedMove[i] = -1 // unused
+		} else if m.Moves[i] == -2 {
+			playedMove[i] = -2 // bear off
+		} else if m.Moves[i] == 24 {
+			playedMove[i] = 25 // bar (24 -> 25)
+		} else {
+			playedMove[i] = m.Moves[i] + 1 // points: add 1 to convert from 0-based to 1-based (0->1, 1->2, ..., 23->24)
+		}
+	}
+
 	move := &CheckerMove{
 		Position:     position,
 		ActivePlayer: m.ActiveP,
 		Dice:         m.Dice,
-		PlayedMove:   m.Moves,
+		PlayedMove:   playedMove,
 		Analysis:     make([]CheckerAnalysis, 0),
 	}
 
@@ -457,10 +473,22 @@ func convertMoveEntry(m *MoveEntry) *CheckerMove {
 		}
 
 		for i := 0; i < numMoves; i++ {
-			// Convert move from [8]int8 to [8]int8
+			// Convert move from XG internal format to desired output format
+			// XG internal: -1=end of move/unused, 0-23=points (0-based), 24=bar, -2=bear off
+			// We output: -1=unused, 1-24=points (1-based), 25=bar, -2=bear off
 			var moveArray [8]int8
+			endOfMove := false
 			for j := 0; j < 8; j++ {
-				moveArray[j] = m.DataMoves.Moves[i][j]
+				if m.DataMoves.Moves[i][j] == -1 || endOfMove {
+					moveArray[j] = -1 // unused (and everything after first -1)
+					endOfMove = true
+				} else if m.DataMoves.Moves[i][j] == -2 {
+					moveArray[j] = -2 // bear off
+				} else if m.DataMoves.Moves[i][j] == 24 {
+					moveArray[j] = 25 // bar (24 -> 25)
+				} else {
+					moveArray[j] = m.DataMoves.Moves[i][j] + 1 // points: add 1 to convert from 0-based to 1-based (0->1, 1->2, ..., 23->24)
+				}
 			}
 
 			analysisPosition := m.DataMoves.PosPlayed[i]
