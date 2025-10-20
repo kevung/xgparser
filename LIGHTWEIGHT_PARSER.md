@@ -114,15 +114,19 @@ Root structure representing a complete match.
 #### MatchMetadata
 ```go
 type MatchMetadata struct {
-    Player1Name string `json:"player1_name"`
-    Player2Name string `json:"player2_name"`
-    Location    string `json:"location"`
-    Event       string `json:"event"`
-    Round       string `json:"round"`
-    DateTime    string `json:"date_time"`
-    MatchLength int32  `json:"match_length"`
+    Player1Name    string `json:"player1_name"`
+    Player2Name    string `json:"player2_name"`
+    Location       string `json:"location"`
+    Event          string `json:"event"`
+    Round          string `json:"round"`
+    DateTime       string `json:"date_time"`
+    MatchLength    int32  `json:"match_length"`
+    EngineVersion  int32  `json:"engine_version"`   // File format version (e.g., 30)
+    ProductVersion string `json:"product_version"` // XG product version (e.g., "eXtreme Gammon 2.19.1")
 }
 ```
+The `EngineVersion` field indicates the XG file format version (typically 30 for recent versions).
+The `ProductVersion` field contains the XG software version string if available in the file.
 
 #### Game
 ```go
@@ -245,7 +249,8 @@ CREATE TABLE matches (
     event VARCHAR(255),
     round VARCHAR(255),
     date_time TIMESTAMP,
-    match_length INTEGER
+    match_length INTEGER,
+    engine_version INTEGER
 );
 
 CREATE TABLE games (

@@ -21,19 +21,22 @@
 package xgparser
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 )
 
 // MatchMetadata contains essential match information
 type MatchMetadata struct {
-	Player1Name string `json:"player1_name"`
-	Player2Name string `json:"player2_name"`
-	Location    string `json:"location"`
-	Event       string `json:"event"`
-	Round       string `json:"round"`
-	DateTime    string `json:"date_time"`
-	MatchLength int32  `json:"match_length"`
+	Player1Name    string `json:"player1_name"`
+	Player2Name    string `json:"player2_name"`
+	Location       string `json:"location"`
+	Event          string `json:"event"`
+	Round          string `json:"round"`
+	DateTime       string `json:"date_time"`
+	MatchLength    int32  `json:"match_length"`
+	EngineVersion  int32  `json:"engine_version"`  // File format version (e.g., 30)
+	ProductVersion string `json:"product_version"` // XG product version (e.g., "eXtreme Gammon 2.19.1")
 }
 
 // Position represents a backgammon position
@@ -129,6 +132,18 @@ func ParseXG(segments []*Segment) (*Match, error) {
 	var currentGame *Game
 	fileVersion := int32(-1)
 
+	// Extract product version from GDF header if present
+	for _, segment := range segments {
+		if segment.Type == SegmentGDFHdr {
+			gdfHeader := &GameDataFormatHdrRecord{}
+			reader := bytes.NewReader(segment.Data)
+			if err := gdfHeader.FromStream(reader); err == nil {
+				match.Metadata.ProductVersion = gdfHeader.GameName
+			}
+			break
+		}
+	}
+
 	for _, segment := range segments {
 		if segment.Type == SegmentXGGameFile {
 			records, err := ParseGameFile(segment.Data, fileVersion)
@@ -142,13 +157,14 @@ func ParseXG(segments []*Segment) (*Match, error) {
 					fileVersion = r.Version
 					// Extract match metadata
 					match.Metadata = MatchMetadata{
-						Player1Name: getPreferredString(r.Player1, r.SPlayer1),
-						Player2Name: getPreferredString(r.Player2, r.SPlayer2),
-						Location:    getPreferredString(r.Location, r.SLocation),
-						Event:       getPreferredString(r.Event, r.SEvent),
-						Round:       getPreferredString(r.Round, r.SRound),
-						DateTime:    r.Date,
-						MatchLength: r.MatchLength,
+						Player1Name:   getPreferredString(r.Player1, r.SPlayer1),
+						Player2Name:   getPreferredString(r.Player2, r.SPlayer2),
+						Location:      getPreferredString(r.Location, r.SLocation),
+						Event:         getPreferredString(r.Event, r.SEvent),
+						Round:         getPreferredString(r.Round, r.SRound),
+						DateTime:      r.Date,
+						MatchLength:   r.MatchLength,
+						EngineVersion: r.Version,
 					}
 
 				case *HeaderGameEntry:
