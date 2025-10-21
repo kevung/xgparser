@@ -27,6 +27,7 @@ import (
 )
 
 // MatchMetadata contains essential match information
+// This structure is used for both XG binary files and XGID position text files
 type MatchMetadata struct {
 	Player1Name    string `json:"player1_name"`
 	Player2Name    string `json:"player2_name"`
@@ -35,8 +36,9 @@ type MatchMetadata struct {
 	Round          string `json:"round"`
 	DateTime       string `json:"date_time"`
 	MatchLength    int32  `json:"match_length"`
-	EngineVersion  int32  `json:"engine_version"`  // File format version (e.g., 30)
+	EngineVersion  int32  `json:"engine_version"`  // File format version (e.g., 30) - XG binary only
 	ProductVersion string `json:"product_version"` // XG product version (e.g., "eXtreme Gammon 2.19.1")
+	MET            string `json:"met"`             // Match equity table (e.g., "Kazaross XG2") - XGID only
 }
 
 // Position represents a backgammon position

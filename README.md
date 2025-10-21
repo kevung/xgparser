@@ -527,17 +527,57 @@ Expected differences in diff output:
 
 All numerical values should be identical (within float32 precision).
 
-## File Structure
+## Project Structure
 
 ```
 xgparser/
-├── xgutils.go      # Utility functions
-├── xgzarc.go       # Archive handling  
-├── xgstruct.go     # Data structures ⚠️ IN PROGRESS
-└── xgimport.go     # File import
+├── cmd/                    # Command-line tools
+│   ├── batch_xgid/        # Batch XGID file processor
+│   ├── debug_moves/       # Move debugging utility
+│   ├── reader_example/    # File reading example
+│   ├── stats_example/     # Statistics example
+│   ├── web_example/       # Web server example
+│   ├── xgid_cube_parser/  # XGID cube decision parser
+│   ├── xgid_parser/       # XGID file parser
+│   ├── xglight/           # Lightweight parser CLI
+│   └── xgparser/          # Full parser CLI
+│
+├── xgparser/              # Core library package
+│   ├── xgid.go           # XGID parsing
+│   ├── xgid_test.go      # XGID tests
+│   ├── xgimport.go       # File import
+│   ├── xglight.go        # Lightweight parser
+│   ├── xgstruct.go       # Data structures
+│   ├── xgutils.go        # Utility functions
+│   └── xgzarc.go         # Archive handling
+│
+├── tools/                 # Development utilities
+│   └── verify_all_xgid.go # XGID verification tool
+│
+├── docs/                  # Additional documentation
+├── tmp/                   # Test data and examples
+│   └── xgid/             # XGID test files (9 languages)
+│
+├── README.md             # This file
+├── LICENSE               # LGPL-2.1 license
+├── LANGUAGE_SUPPORT.md   # Multi-language parsing info
+├── LIGHTWEIGHT_PARSER.md # Lightweight parser docs
+├── XGID_PARSER.md        # XGID format documentation
+└── go.mod                # Go module definition
+```
 
-cmd/xgparser/
-└── main.go         # CLI tool
+## Building
+
+Build all command-line tools:
+```bash
+# Build specific tool
+go build -o bin/xgid_parser ./cmd/xgid_parser
+
+# Build all tools
+for cmd in cmd/*; do
+  name=$(basename $cmd)
+  go build -o bin/$name ./$cmd
+done
 ```
 
 ## Architecture

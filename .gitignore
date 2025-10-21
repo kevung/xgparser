@@ -1,5 +1,27 @@
 xglight
-xgparser
 xgparser_full
 stats_example
+batch_xgid
+xgid_parser
 tmp
+
+# Compiled binaries
+/batch_xgid
+/xgid_parser
+/xglight
+/xgparser_full
+/stats_example
+cmd/*/main
+cmd/*/*.exe
+
+# Debug and temporary files
+/debug_tools/
+CLEANUP_PLAN.md
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+bin/
