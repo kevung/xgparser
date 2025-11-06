@@ -3,6 +3,7 @@ xgparser_full
 stats_example
 batch_xgid
 xgid_parser
+xgtext
 tmp
 
 # Compiled binaries
