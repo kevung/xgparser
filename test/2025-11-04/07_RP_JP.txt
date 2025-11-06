@@ -1,0 +1,36 @@
+XGID=---aBBCCCB----a-aa-babbbb-:1:1:1:00:1:2:0:9:10
+
+X:プレーヤー 1   O:プレーヤー 2
+Score is X:1 O:2 9 pt.(s) match.
+ +13-14-15-16-17-18------19-20-21-22-23-24-+
+ |    O     O  O    |   | O  O  O  O  O  O |
+ |                  |   | O     O  O  O  O |
+ |                  |   |                  |
+ |                  |   |                  |
+ |                  |   |                  |
+ |                  |BAR|                  |
+ |                  |   |                  |
+ |                  |   |                  |
+ |             X  X |   | X                | +---+
+ |          X  X  X |   | X  X  X          | | 2 |
+ |          X  X  X |   | X  X  X  O       | +---+
+ +12-11-10--9--8--7-------6--5--4--3--2--1-+
+Pip count  X: 99  O: 87 X-O: 1-2/9
+キューブ: 2, X own cube
+X on roll, cube action
+
+Analyzed in XG Roller++
+Player Winning Chances:   89.87% (G:7.61% B:0.29%)
+Opponent Winning Chances: 10.13% (G:0.61% B:0.01%)
+
+Cubeless Equities: No Double=+0.881, Double=+1.928
+
+Cubeful Equities:
+       ノーリダブル:    +1.027
+       リダブル/テイク:  +1.869 (+0.842)
+       リダブル/パス:   +1.000 (-0.027)
+
+ベストキューブアクション：ツーグッド / パス
+ダブルを正当化するのに必要な相手がテイクする確率: 3.1%
+
+eXtreme Gammon Version: 2.10, MET: Kazaross XG2
