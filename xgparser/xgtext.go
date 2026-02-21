@@ -42,6 +42,7 @@ type XGTextPosition struct {
 	ActionType   string          // "play", "cube", "redouble"
 	Analysis     []XGMove        // Move analysis (for play actions)
 	CubeAnalysis *XGCubeAnalysis // Cube analysis (for cube actions)
+	Comment      string          // User comment extracted from text
 	Version      string          // XG version
 	MET          string          // Match equity table
 }
@@ -63,22 +64,29 @@ type XGMove struct {
 
 // XGCubeAnalysis represents cube action analysis
 type XGCubeAnalysis struct {
-	PlayerWin        float64
-	PlayerG          float64
-	PlayerB          float64
-	OppWin           float64
-	OppG             float64
-	OppB             float64
-	CubelessNoDouble float64
-	CubelessDouble   float64
-	NoDouble         float64
-	DoubleTake       float64
-	DoubleDrop       float64
-	NoRedouble       float64
-	RedoubleTake     float64
-	RedoubleDrop     float64
-	Recommendation   string
-	AnalyzerType     string // "XG Roller++" etc
+	PlayerWin         float64
+	PlayerG           float64
+	PlayerB           float64
+	OppWin            float64
+	OppG              float64
+	OppB              float64
+	CubelessNoDouble  float64
+	CubelessDouble    float64
+	NoDouble          float64
+	NoDoubleError     float64
+	DoubleTake        float64
+	DoubleTakeError   float64
+	DoubleDrop        float64
+	DoubleDropError   float64
+	DoubleBeaver      float64
+	DoubleBeaverError float64
+	NoRedouble        float64
+	RedoubleTake      float64
+	RedoubleDrop      float64
+	Recommendation    string
+	WrongPassPct      float64 // Percentage of wrong pass needed
+	WrongTakePct      float64 // Percentage of wrong take needed
+	AnalysisDepth     string  // e.g. "XG Roller++"
 }
 
 // ParseXGTextPosition parses an XG text position from a reader
@@ -90,10 +98,13 @@ func ParseXGTextPosition(r io.Reader) (*XGTextPosition, error) {
 
 	inBoard := false
 	lineNum := 0
+	var allLines []string    // collect all lines for comment extraction
+	var lastMoveIdx int = -1 // track last parsed move for attaching player/opponent stats
 
 	for scanner.Scan() {
 		line := scanner.Text()
 		lineNum++
+		allLines = append(allLines, line)
 
 		// Parse XGID (first line)
 		if strings.HasPrefix(line, "XGID=") {
@@ -143,11 +154,17 @@ func ParseXGTextPosition(r io.Reader) (*XGTextPosition, error) {
 		// Parse move analysis
 		if move, ok := parseMoveAnalysis(line); ok {
 			pos.Analysis = append(pos.Analysis, move)
+			lastMoveIdx = len(pos.Analysis) - 1
+			continue
+		}
+
+		// Parse per-move player winning chances
+		if lastMoveIdx >= 0 && parseMovePlayerStats(line, &pos.Analysis[lastMoveIdx]) {
 			continue
 		}
 
 		// Parse cube analysis
-		if parseCubeAnalysis(line, pos, scanner) {
+		if parseCubeAnalysis(line, pos, scanner, &allLines) {
 			continue
 		}
 
@@ -166,6 +183,9 @@ func ParseXGTextPosition(r io.Reader) (*XGTextPosition, error) {
 	if pos.XGID == "" {
 		return nil, fmt.Errorf("missing XGID in text position")
 	}
+
+	// Extract comment section from collected lines
+	pos.Comment = extractComment(allLines, pos.ActionType == "cube" || pos.ActionType == "redouble")
 
 	return pos, nil
 }
@@ -195,6 +215,48 @@ func parsePlayerToMove(line string, pos *XGTextPosition) bool {
 		}
 	}
 	return false
+}
+
+// parseMovePlayerStats parses Player/Opponent winning chances lines that follow a move
+func parseMovePlayerStats(line string, move *XGMove) bool {
+	// "      Player:   25.45% (G:0.00% B:0.00%)"
+	// "      Joueur:     25.45% (G:0.00% B:0.00%)"
+	// "      Spieler: 25.45% (G:0.00% B:0.00%)"
+	// "      プレーヤー: 25.45% (G:0.00% B:0.00%)"
+	isPlayer := strings.Contains(line, "Player:") ||
+		strings.Contains(line, "Joueur:") ||
+		strings.Contains(line, "Spieler:") ||
+		strings.Contains(line, "プレーヤー:")
+
+	isOpponent := strings.Contains(line, "Opponent:") ||
+		strings.Contains(line, "Adversaire:") ||
+		strings.Contains(line, "Gegner:") ||
+		strings.Contains(line, "対戦相手:")
+
+	if !isPlayer && !isOpponent {
+		return false
+	}
+
+	re := regexp.MustCompile(`(\d+\.\d+)%\s+\(G:(\d+\.\d+)%\s+B:(\d+\.\d+)%\)`)
+	matches := re.FindStringSubmatch(line)
+	if matches == nil {
+		return false
+	}
+
+	win, _ := strconv.ParseFloat(matches[1], 64)
+	g, _ := strconv.ParseFloat(matches[2], 64)
+	b, _ := strconv.ParseFloat(matches[3], 64)
+
+	if isPlayer {
+		move.PlayerWin = win
+		move.PlayerG = g
+		move.PlayerB = b
+	} else {
+		move.OppWin = win
+		move.OppG = g
+		move.OppB = b
+	}
+	return true
 }
 
 // parseMoveAnalysis parses a move analysis line
@@ -233,7 +295,7 @@ func parseMoveAnalysis(line string) (XGMove, bool) {
 }
 
 // parseCubeAnalysis parses cube action analysis
-func parseCubeAnalysis(line string, pos *XGTextPosition, scanner *bufio.Scanner) bool {
+func parseCubeAnalysis(line string, pos *XGTextPosition, scanner *bufio.Scanner, allLines *[]string) bool {
 	// English: "Analyzed in XG Roller++"
 	// French: "Analysé avec XG Roller++"
 	// German: "Analysiert in XG Roller++"
@@ -249,14 +311,13 @@ func parseCubeAnalysis(line string, pos *XGTextPosition, scanner *bufio.Scanner)
 		pos.CubeAnalysis = &XGCubeAnalysis{}
 	}
 
-	// Extract analyzer type
-	if strings.Contains(line, "XG Roller++") {
-		pos.CubeAnalysis.AnalyzerType = "XG Roller++"
-	}
+	// Extract analyzer type flexibly
+	pos.CubeAnalysis.AnalysisDepth = extractAnalyzerType(line)
 
 	// Continue parsing following lines for cube analysis
 	for scanner.Scan() {
 		nextLine := scanner.Text()
+		*allLines = append(*allLines, nextLine)
 
 		// Player winning chances
 		// English: "Player Winning Chances:"
@@ -306,6 +367,22 @@ func parseCubeAnalysis(line string, pos *XGTextPosition, scanner *bufio.Scanner)
 			strings.Contains(nextLine, "Doppeln/Passe") || strings.Contains(nextLine, "Redoppeln/Ablehnen") ||
 			strings.Contains(nextLine, "ダブル/パス") || strings.Contains(nextLine, "リダブル/パス") {
 			parseCubefulEquity(nextLine, pos.CubeAnalysis, "double_drop")
+		}
+		// Double/Beaver
+		if strings.Contains(nextLine, "Double/Beaver") ||
+			strings.Contains(nextLine, "Doppeln/Beaver") ||
+			strings.Contains(nextLine, "ダブル/ビーバー") {
+			parseCubefulEquity(nextLine, pos.CubeAnalysis, "double_beaver")
+		}
+
+		// Wrong pass/take percentages
+		if strings.Contains(nextLine, "wrong pass") || strings.Contains(nextLine, "passes incorrectes") ||
+			strings.Contains(nextLine, "falschen Ablehnen") || strings.Contains(nextLine, "パスする確率") {
+			parseWrongPercentage(nextLine, pos.CubeAnalysis, "pass")
+		}
+		if strings.Contains(nextLine, "wrong take") || strings.Contains(nextLine, "prises incorrectes") ||
+			strings.Contains(nextLine, "falschen Annehmen") || strings.Contains(nextLine, "テイクする確率") {
+			parseWrongPercentage(nextLine, pos.CubeAnalysis, "take")
 		}
 
 		// Parse cube recommendation
@@ -385,14 +462,24 @@ func parseCubefulEquity(line string, cube *XGCubeAnalysis, equityType string) {
 	re := regexp.MustCompile(`([+-]?\d+\.\d+)(?:\s+\(([+-]?\d+\.\d+)\))?`)
 	if matches := re.FindStringSubmatch(line); matches != nil {
 		equity, _ := strconv.ParseFloat(matches[1], 64)
+		var equityErr float64
+		if len(matches) > 2 && matches[2] != "" {
+			equityErr, _ = strconv.ParseFloat(matches[2], 64)
+		}
 
 		switch equityType {
 		case "no_double":
 			cube.NoDouble = equity
+			cube.NoDoubleError = equityErr
 		case "double_take":
 			cube.DoubleTake = equity
+			cube.DoubleTakeError = equityErr
 		case "double_drop":
 			cube.DoubleDrop = equity
+			cube.DoubleDropError = equityErr
+		case "double_beaver":
+			cube.DoubleBeaver = equity
+			cube.DoubleBeaverError = equityErr
 		}
 	}
 }
@@ -443,6 +530,114 @@ func parseVersionInfo(line string, pos *XGTextPosition) {
 	}
 }
 
+// extractAnalyzerType extracts the analyzer type from the "Analyzed in" line
+func extractAnalyzerType(line string) string {
+	// English: "Analyzed in XG Roller++"
+	// French: "Analysé avec XG Roller++"
+	// German: "Analysiert in XG Roller++"
+	// Japanese: "XG Roller++で分析済み"
+
+	prefixes := []string{
+		"Analyzed in ",
+		"Analysé avec ",
+		"Analysiert in ",
+	}
+	for _, prefix := range prefixes {
+		if idx := strings.Index(line, prefix); idx >= 0 {
+			return strings.TrimSpace(line[idx+len(prefix):])
+		}
+	}
+	// Japanese: "XG Roller++で分析済み" - text before で分析済み
+	if idx := strings.Index(line, "で分析済み"); idx >= 0 {
+		return strings.TrimSpace(line[:idx])
+	}
+	return strings.TrimSpace(line)
+}
+
+// parseWrongPercentage parses wrong pass/take percentage lines
+func parseWrongPercentage(line string, cube *XGCubeAnalysis, pctType string) {
+	re := regexp.MustCompile(`(\d+\.\d+)%`)
+	if matches := re.FindStringSubmatch(line); matches != nil {
+		pct, _ := strconv.ParseFloat(matches[1], 64)
+		switch pctType {
+		case "pass":
+			cube.WrongPassPct = pct
+		case "take":
+			cube.WrongTakePct = pct
+		}
+	}
+}
+
+// extractComment extracts the user comment section from collected text lines.
+// For checker analysis: text between the last Opponent/Adversaire/Gegner/対戦相手 line
+// and the eXtreme Gammon Version line, skipping blank lines at boundaries.
+// For cube analysis: text between the last analysis line (Best Cube action or wrong %)
+// and the eXtreme Gammon Version line.
+func extractComment(lines []string, isCube bool) string {
+	versionLineIdx := -1
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.Contains(lines[i], "eXtreme Gammon Version") {
+			versionLineIdx = i
+			break
+		}
+	}
+	if versionLineIdx < 0 {
+		return ""
+	}
+
+	// Find the end of analysis section
+	analysisEndIdx := -1
+	if isCube {
+		// For cube: find last analysis-related line before version
+		for i := versionLineIdx - 1; i >= 0; i-- {
+			line := lines[i]
+			if strings.Contains(line, "Best Cube action") ||
+				strings.Contains(line, "Meilleur action du videau") ||
+				strings.Contains(line, "Beste Dopplerwürfel") ||
+				strings.Contains(line, "ベストキューブアクション") ||
+				strings.Contains(line, "wrong pass") || strings.Contains(line, "wrong take") ||
+				strings.Contains(line, "passes incorrectes") || strings.Contains(line, "prises incorrectes") ||
+				strings.Contains(line, "falschen Ablehnen") || strings.Contains(line, "falschen Annehmen") ||
+				strings.Contains(line, "パスする確率") || strings.Contains(line, "テイクする確率") {
+				analysisEndIdx = i
+				break
+			}
+		}
+	} else {
+		// For checker: find the last Opponent/Adversaire/Gegner line
+		for i := versionLineIdx - 1; i >= 0; i-- {
+			line := lines[i]
+			if strings.Contains(line, "Opponent:") || strings.Contains(line, "Adversaire:") ||
+				strings.Contains(line, "Gegner:") || strings.Contains(line, "対戦相手:") {
+				analysisEndIdx = i
+				break
+			}
+		}
+	}
+
+	if analysisEndIdx < 0 || analysisEndIdx >= versionLineIdx-1 {
+		return ""
+	}
+
+	// Collect lines between analysisEnd and version, trimming leading/trailing blank lines
+	commentLines := lines[analysisEndIdx+1 : versionLineIdx]
+
+	// Trim leading blank lines
+	for len(commentLines) > 0 && strings.TrimSpace(commentLines[0]) == "" {
+		commentLines = commentLines[1:]
+	}
+	// Trim trailing blank lines
+	for len(commentLines) > 0 && strings.TrimSpace(commentLines[len(commentLines)-1]) == "" {
+		commentLines = commentLines[:len(commentLines)-1]
+	}
+
+	if len(commentLines) == 0 {
+		return ""
+	}
+
+	return strings.Join(commentLines, "\n")
+}
+
 // ToJSON converts the text position to a JSON-friendly map
 func (p *XGTextPosition) ToJSON() map[string]interface{} {
 	result := map[string]interface{}{
@@ -452,6 +647,7 @@ func (p *XGTextPosition) ToJSON() map[string]interface{} {
 		"action_type": p.ActionType,
 		"version":     p.Version,
 		"met":         p.MET,
+		"comment":     p.Comment,
 	}
 
 	if len(p.Analysis) > 0 {
@@ -463,6 +659,12 @@ func (p *XGTextPosition) ToJSON() map[string]interface{} {
 				"move":        move.Move,
 				"equity":      move.Equity,
 				"equity_diff": move.EquityDiff,
+				"player_win":  move.PlayerWin,
+				"player_g":    move.PlayerG,
+				"player_b":    move.PlayerB,
+				"opp_win":     move.OppWin,
+				"opp_g":       move.OppG,
+				"opp_b":       move.OppB,
 			})
 		}
 		result["moves"] = moves
@@ -479,10 +681,15 @@ func (p *XGTextPosition) ToJSON() map[string]interface{} {
 			"cubeless_no_double":  p.CubeAnalysis.CubelessNoDouble,
 			"cubeless_double":     p.CubeAnalysis.CubelessDouble,
 			"no_double":           p.CubeAnalysis.NoDouble,
+			"no_double_error":     p.CubeAnalysis.NoDoubleError,
 			"double_take":         p.CubeAnalysis.DoubleTake,
+			"double_take_error":   p.CubeAnalysis.DoubleTakeError,
 			"double_drop":         p.CubeAnalysis.DoubleDrop,
+			"double_drop_error":   p.CubeAnalysis.DoubleDropError,
 			"recommendation":      p.CubeAnalysis.Recommendation,
-			"analyzer":            p.CubeAnalysis.AnalyzerType,
+			"analysis_depth":      p.CubeAnalysis.AnalysisDepth,
+			"wrong_pass_pct":      p.CubeAnalysis.WrongPassPct,
+			"wrong_take_pct":      p.CubeAnalysis.WrongTakePct,
 		}
 	}
 
