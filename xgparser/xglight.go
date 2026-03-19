@@ -210,6 +210,12 @@ func ParseXG(segments []*Segment) (*Match, error) {
 		}
 	}
 
+	// Handle xgp position files which have no FooterGameEntry:
+	// if a game was started but never closed, append it as-is.
+	if currentGame != nil && len(currentGame.Moves) > 0 {
+		match.Games = append(match.Games, *currentGame)
+	}
+
 	return &match, nil
 }
 
