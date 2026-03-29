@@ -24,6 +24,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"strings"
+	"unicode/utf8"
 )
 
 // MatchMetadata contains essential match information
@@ -104,6 +106,7 @@ type Move struct {
 	MoveType    string       `json:"move_type"` // "checker" or "cube"
 	CheckerMove *CheckerMove `json:"checker_move,omitempty"`
 	CubeMove    *CubeMove    `json:"cube_move,omitempty"`
+	Comment     string       `json:"comment,omitempty"` // User comment for this move (plain text, RTF stripped)
 }
 
 // Game represents a single game within a match
@@ -146,6 +149,15 @@ func ParseXG(segments []*Segment) (*Match, error) {
 		}
 	}
 
+	// Parse comment segment if present
+	var comments []string
+	for _, segment := range segments {
+		if segment.Type == SegmentXGComment && len(segment.Data) > 0 {
+			comments = parseCommentSegment(segment.Data)
+			break
+		}
+	}
+
 	for _, segment := range segments {
 		if segment.Type == SegmentXGGameFile {
 			records, err := ParseGameFile(segment.Data, fileVersion)
@@ -182,20 +194,28 @@ func ParseXG(segments []*Segment) (*Match, error) {
 						// Skip initial position cube entries (Double == -2) which don't represent actual cube decisions
 						if r.Double != -2 {
 							cubeMove := convertCubeEntry(r)
-							currentGame.Moves = append(currentGame.Moves, Move{
+							move := Move{
 								MoveType: "cube",
 								CubeMove: cubeMove,
-							})
+							}
+							if r.CommentCube >= 0 && int(r.CommentCube) < len(comments) {
+								move.Comment = comments[r.CommentCube]
+							}
+							currentGame.Moves = append(currentGame.Moves, move)
 						}
 					}
 
 				case *MoveEntry:
 					if currentGame != nil {
 						checkerMove := convertMoveEntry(r)
-						currentGame.Moves = append(currentGame.Moves, Move{
+						move := Move{
 							MoveType:    "checker",
 							CheckerMove: checkerMove,
-						})
+						}
+						if r.CommentMove >= 0 && int(r.CommentMove) < len(comments) {
+							move.Comment = comments[r.CommentMove]
+						}
+						currentGame.Moves = append(currentGame.Moves, move)
 					}
 
 				case *FooterGameEntry:
@@ -217,6 +237,124 @@ func ParseXG(segments []*Segment) (*Match, error) {
 	}
 
 	return &match, nil
+}
+
+// parseCommentSegment parses the XG comment segment (temp.xgc) into a slice of plain text strings.
+// The comment segment is an RTF text file where individual comments are separated by CRLF (\r\n).
+// Within each comment, \x01\x02 sequences represent actual CRLF line breaks.
+func parseCommentSegment(data []byte) []string {
+	text := string(data)
+	// Split by CRLF to get individual comments
+	rawComments := strings.Split(text, "\r\n")
+
+	var comments []string
+	for _, raw := range rawComments {
+		if len(raw) == 0 {
+			continue
+		}
+		// Replace \x01\x02 with real newlines within the comment
+		raw = strings.ReplaceAll(raw, "\x01\x02", "\r\n")
+		// Strip RTF formatting to get plain text
+		plain := stripRTF(raw)
+		comments = append(comments, plain)
+	}
+	return comments
+}
+
+// stripRTF extracts plain text from RTF content.
+// This is a lightweight RTF parser that handles the subset used by XG comments.
+func stripRTF(rtf string) string {
+	if !strings.HasPrefix(rtf, "{\\rtf") {
+		return rtf
+	}
+
+	var result strings.Builder
+	i := 0
+	depth := 0
+
+	for i < len(rtf) {
+		ch := rtf[i]
+
+		switch {
+		case ch == '{':
+			depth++
+			i++
+		case ch == '}':
+			depth--
+			i++
+		case ch == '\\':
+			i++
+			if i >= len(rtf) {
+				break
+			}
+			// Check for special escaped characters
+			if rtf[i] == '\\' || rtf[i] == '{' || rtf[i] == '}' {
+				result.WriteByte(rtf[i])
+				i++
+				continue
+			}
+			// Check for Unicode escape \'XX (hex-encoded byte in Windows-1252 codepage)
+			if rtf[i] == '\'' && i+2 < len(rtf) {
+				hexStr := rtf[i+1 : i+3]
+				var charVal byte
+				for _, hc := range hexStr {
+					charVal <<= 4
+					if hc >= '0' && hc <= '9' {
+						charVal |= byte(hc - '0')
+					} else if hc >= 'a' && hc <= 'f' {
+						charVal |= byte(hc - 'a' + 10)
+					} else if hc >= 'A' && hc <= 'F' {
+						charVal |= byte(hc - 'A' + 10)
+					}
+				}
+				// Convert Windows-1252 byte to UTF-8
+				// For values 0-127, it's the same as ASCII/UTF-8
+				// For 128-255, the code point is the same as the byte value in Latin-1/Windows-1252
+				// (Windows-1252 is a superset of Latin-1 for 0xa0-0xff)
+				r := rune(charVal)
+				var buf [4]byte
+				n := utf8.EncodeRune(buf[:], r)
+				result.Write(buf[:n])
+				i += 3
+				continue
+			}
+			// Read control word
+			wordStart := i
+			for i < len(rtf) && ((rtf[i] >= 'a' && rtf[i] <= 'z') || (rtf[i] >= 'A' && rtf[i] <= 'Z')) {
+				i++
+			}
+			word := rtf[wordStart:i]
+			// Skip optional numeric parameter
+			for i < len(rtf) && ((rtf[i] >= '0' && rtf[i] <= '9') || rtf[i] == '-') {
+				i++
+			}
+			// Skip single trailing space delimiter
+			if i < len(rtf) && rtf[i] == ' ' {
+				i++
+			}
+			// Handle known control words
+			switch word {
+			case "par":
+				result.WriteByte('\n')
+			case "line":
+				result.WriteByte('\n')
+			case "tab":
+				result.WriteByte('\t')
+			}
+			// Skip all other control words (fonttbl, colortbl, generator, etc.)
+			// These are typically inside groups that don't produce visible text
+		default:
+			// Only emit text at nesting depth 1 (the main document group)
+			// Skip content in nested groups like {\fonttbl...}, {\colortbl...}, {\*\generator...}
+			// Also skip CR/LF characters which are formatting artifacts in RTF
+			if depth == 1 && ch != '\r' && ch != '\n' {
+				result.WriteByte(ch)
+			}
+			i++
+		}
+	}
+
+	return strings.TrimSpace(result.String())
 }
 
 // ParseXGFromFile parses an XG file from disk and returns a lightweight match structure
