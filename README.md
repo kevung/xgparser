@@ -12,17 +12,20 @@ A Go library for parsing eXtremeGammon (.xg) backgammon match files, with both f
 
 ## License
 
-This library is licensed under the **GNU Lesser General Public License v2.1 (LGPL-2.1)**, the same license as the original Python xgdatatools library.
+This library is licensed under the **MIT License** (see `LICENSE`).
 
 ### Credits
 
-- **Original Python library**: Michael Petch (Copyright © 2013-2014)
+The `.xg` / `.xgp` file format was first documented publicly by the Python
+`xgdatatools` library:
+
+- **xgdatatools**: Michael Petch (Copyright © 2013-2014)
   - Email: mpetch@gnubg.org
   - GitHub: https://github.com/oysteijo/xgdatatools
 
-- **Go port and lightweight parser**: Kevin Unger (Copyright © 2025)
+- **This library**: Kévin Unger (Copyright © 2025)
 
-All credit for the original design and implementation goes to Michael Petch.
+Thanks to Michael Petch for describing the format.
 
 ## Installation
 
@@ -559,7 +562,7 @@ xgparser/
 │   └── xgid/             # XGID test files (9 languages)
 │
 ├── README.md             # This file
-├── LICENSE               # LGPL-2.1 license
+├── LICENSE               # MIT license
 ├── LANGUAGE_SUPPORT.md   # Multi-language parsing info
 ├── LIGHTWEIGHT_PARSER.md # Lightweight parser docs
 ├── XGID_PARSER.md        # XGID format documentation
