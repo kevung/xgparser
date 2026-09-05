@@ -402,7 +402,7 @@ All tests validate:
 
 ## License
 
-This library is licensed under the **GNU Lesser General Public License v2.1 (LGPL-2.1)**, same as the original xgdatatools library.
+This library is licensed under the **MIT License**.
 
 ### Credits
 

@@ -27,7 +27,7 @@ Created `docs/` directory and moved:
 
 Main documentation remains in root:
 - `README.md` - Main project documentation
-- `LICENSE` - LGPL-2.1 license
+- `LICENSE` - MIT license
 - `LANGUAGE_SUPPORT.md` - Multi-language parsing
 - `LIGHTWEIGHT_PARSER.md` - Lightweight parser guide
 - `XGID_PARSER.md` - XGID format specification
@@ -59,7 +59,7 @@ xgparser/
 ├── docs/                  # Historical documentation
 ├── tmp/                   # Test data
 ├── README.md              # Main documentation
-├── LICENSE                # LGPL-2.1
+├── LICENSE                # MIT
 ├── LANGUAGE_SUPPORT.md    # Language support docs
 ├── LIGHTWEIGHT_PARSER.md  # Parser guide
 ├── XGID_PARSER.md         # XGID format docs

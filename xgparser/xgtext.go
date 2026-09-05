@@ -1,24 +1,12 @@
 //
 //   xgtext.go - XG text position parser module
-//   Copyright (C) 2025 Kevin Unger
+//   Copyright (C) 2025 Kévin Unger
 //
-//   This library is free software; you can redistribute it and/or
-//   modify it under the terms of the GNU Lesser General Public
-//   License as published by the Free Software Foundation; either
-//   version 2.1 of the License, or (at your option) any later version.
+//   Released under the MIT License; see LICENSE at the repository root.
 //
-//   This library is distributed in the hope that it will be useful,
-//   but WITHOUT ANY WARRANTY; without even the implied warranty of
-//   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-//   Lesser General Public License for more details.
-//
-//   You should have received a copy of the GNU Lesser General Public
-//   License along with this library; if not, write to the Free Software
-//   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301
-//   USA
-//
-//   This module parses XG text positions exported from eXtreme Gammon
-//   in multiple languages (English, French, German, Japanese)
+//   The .xg / .xgp format was first documented publicly by Michael Petch
+//   <mpetch@gnubg.org> in the Python xgdatatools library; that description
+//   is credited here, the code below is this repository's own.
 //
 
 package xgparser

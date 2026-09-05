@@ -208,4 +208,4 @@ match := &xgparser.Match{
 
 ## License
 
-LGPL 2.1 - See LICENSE file for details.
+MIT - See LICENSE file for details.
