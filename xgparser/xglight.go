@@ -105,7 +105,7 @@ type Game struct {
 	GameNumber   int32    `json:"game_number"`
 	InitialScore [2]int32 `json:"initial_score"` // Score at start of game
 	Moves        []Move   `json:"moves"`
-	Winner       int32    `json:"winner"` // -1=player1, 1=player2, 0=not completed
+	Winner       int32    `json:"winner"` // 1=player1, -1=player2, 0=not completed (as stored by XG)
 	PointsWon    int32    `json:"points_won"`
 }
 
