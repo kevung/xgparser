@@ -16,7 +16,8 @@ func main() {
 	failedFiles := 0
 	var failures []string
 
-	fmt.Println("=== XGID Parser Verification Across All Languages ===\n")
+	fmt.Println("=== XGID Parser Verification Across All Languages ===")
+	fmt.Println()
 
 	for _, lang := range languages {
 		langDir := filepath.Join("tmp/xgid", lang)
