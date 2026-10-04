@@ -12,7 +12,6 @@
 package xgparser
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"strings"
@@ -30,8 +29,24 @@ type MatchMetadata struct {
 	DateTime       string `json:"date_time"`
 	MatchLength    int32  `json:"match_length"`
 	EngineVersion  int32  `json:"engine_version"`  // File format version (e.g., 30) - XG binary only
-	ProductVersion string `json:"product_version"` // XG product version (e.g., "eXtreme Gammon 2.19.1")
+	ProductVersion string `json:"product_version"` // XG product version (e.g., "eXtreme Gammon 2.19.1") - XGID only: an .xg/.xgp file does not name the release that wrote it
 	MET            string `json:"met"`             // Match equity table (e.g., "Kazaross XG2") - XGID only
+
+	// The fields below come from the XG binary match header (.xg/.xgp) and
+	// stay at their zero value for XGID text.
+
+	// Player ratings and experience as XG stores them. XG writes them for
+	// every player, rated or not (1600 and 0 when the player has no profile).
+	Player1Elo        float64 `json:"player1_elo,omitempty"`
+	Player2Elo        float64 `json:"player2_elo,omitempty"`
+	Player1Experience int32   `json:"player1_experience,omitempty"`
+	Player2Experience int32   `json:"player2_experience,omitempty"`
+	Transcriber       string  `json:"transcriber,omitempty"` // Who transcribed the match (file format 30 and later)
+	Jacoby            bool    `json:"jacoby,omitempty"`      // Jacoby rule in force (money sessions)
+	Beaver            bool    `json:"beaver,omitempty"`      // Beavers allowed (money sessions)
+	// Match header and footer comments (plain text, RTF stripped).
+	MatchHeaderComment string `json:"match_header_comment,omitempty"`
+	MatchFooterComment string `json:"match_footer_comment,omitempty"`
 }
 
 // Position represents a backgammon position
@@ -128,17 +143,9 @@ func ParseXG(segments []*Segment) (*Match, error) {
 	var currentGame *Game
 	fileVersion := int32(-1)
 
-	// Extract product version from GDF header if present
-	for _, segment := range segments {
-		if segment.Type == SegmentGDFHdr {
-			gdfHeader := &GameDataFormatHdrRecord{}
-			reader := bytes.NewReader(segment.Data)
-			if err := gdfHeader.FromStream(reader); err == nil {
-				match.Metadata.ProductVersion = gdfHeader.GameName
-			}
-			break
-		}
-	}
+	// The GDF header's GameName is a title XG composes from the match
+	// ("Played on <location>"), not a product version: ProductVersion is
+	// left empty for binary files, which do not record the XG release.
 
 	// Parse comment segment if present
 	var comments []string
@@ -160,17 +167,21 @@ func ParseXG(segments []*Segment) (*Match, error) {
 				switch r := rec.(type) {
 				case *HeaderMatchEntry:
 					fileVersion = r.Version
-					// Extract match metadata
-					match.Metadata = MatchMetadata{
-						Player1Name:   getPreferredString(r.Player1, r.SPlayer1),
-						Player2Name:   getPreferredString(r.Player2, r.SPlayer2),
-						Location:      getPreferredString(r.Location, r.SLocation),
-						Event:         getPreferredString(r.Event, r.SEvent),
-						Round:         getPreferredString(r.Round, r.SRound),
-						DateTime:      r.Date,
-						MatchLength:   r.MatchLength,
-						EngineVersion: r.Version,
-					}
+					md := &match.Metadata
+					md.Player1Name = getPreferredString(r.Player1, r.SPlayer1)
+					md.Player2Name = getPreferredString(r.Player2, r.SPlayer2)
+					md.Location = getPreferredString(r.Location, r.SLocation)
+					md.Event = getPreferredString(r.Event, r.SEvent)
+					md.Round = getPreferredString(r.Round, r.SRound)
+					md.DateTime = r.Date
+					md.MatchLength = r.MatchLength
+					md.EngineVersion = r.Version
+					md.Player1Elo, md.Player2Elo = r.Elo1, r.Elo2
+					md.Player1Experience, md.Player2Experience = r.Exp1, r.Exp2
+					md.Transcriber = strings.TrimSpace(r.Transcriber)
+					md.Jacoby, md.Beaver = r.Jacoby, r.Beaver
+					md.MatchHeaderComment = commentAt(comments, r.CommentHeaderMatch)
+					md.MatchFooterComment = commentAt(comments, r.CommentFooterMatch)
 
 				case *HeaderGameEntry:
 					// Start a new game
@@ -228,6 +239,15 @@ func ParseXG(segments []*Segment) (*Match, error) {
 	}
 
 	return &match, nil
+}
+
+// commentAt returns the comment at index i, or "" when XG stores none (-1)
+// or the index falls outside the comment segment.
+func commentAt(comments []string, i int32) string {
+	if i < 0 || int(i) >= len(comments) {
+		return ""
+	}
+	return comments[i]
 }
 
 // parseCommentSegment parses the XG comment segment (temp.xgc) into a slice of plain text strings.
@@ -362,64 +382,10 @@ func ParseXGFromFile(filename string) (*Match, error) {
 // ParseXGFromReader parses an XG file from an io.Reader and returns a lightweight match structure
 // This allows parsing XG files from network streams, memory buffers, or any io.Reader source.
 func ParseXGFromReader(r io.ReadSeeker) (*Match, error) {
-	// Read and extract the Game Data Format Header
-	gdfHeader := &GameDataFormatHdrRecord{}
-	err := gdfHeader.FromStream(r)
+	segments, err := readSegments(r, false)
 	if err != nil {
 		return nil, err
 	}
-
-	// Get segments using the same logic as Import.GetFileSegments
-	r.Seek(0, io.SeekStart)
-	var segments []*Segment
-
-	// Read GDF header
-	gdfData := make([]byte, gdfHeader.HeaderSize)
-	_, err = io.ReadFull(r, gdfData)
-	if err != nil {
-		return nil, err
-	}
-
-	segments = append(segments, &Segment{
-		Type: SegmentGDFHdr,
-		Data: gdfData,
-	})
-
-	// Extract thumbnail if present
-	if gdfHeader.ThumbnailSize > 0 {
-		r.Seek(gdfHeader.ThumbnailOffset, io.SeekCurrent)
-		imgData := make([]byte, gdfHeader.ThumbnailSize)
-		_, err = io.ReadFull(r, imgData)
-		if err != nil {
-			return nil, err
-		}
-		segments = append(segments, &Segment{
-			Type: SegmentGDFImage,
-			Data: imgData,
-		})
-	}
-
-	// Get archive object
-	archiveObj, err := NewZlibArchive(r)
-	if err != nil {
-		return nil, err
-	}
-
-	// Process all files in the archive
-	for _, fileRec := range archiveObj.ArcRegistry {
-		data, err := archiveObj.GetArchiveFile(&fileRec)
-		if err != nil {
-			return nil, err
-		}
-
-		segmentType := XGFileMap[fileRec.Name]
-		segments = append(segments, &Segment{
-			Type:     segmentType,
-			Data:     data,
-			Filename: fileRec.Name,
-		})
-	}
-
 	return ParseXG(segments)
 }
 

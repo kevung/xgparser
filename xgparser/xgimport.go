@@ -13,6 +13,7 @@ package xgparser
 
 import (
 	"bytes"
+	"compress/zlib"
 	"fmt"
 	"io"
 	"os"
@@ -73,51 +74,62 @@ func (imp *Import) GetFileSegments() ([]*Segment, error) {
 		return nil, err
 	}
 	defer file.Close()
+	return readSegments(file, true)
+}
 
-	var segments []*Segment
-
-	// Read and extract the Game Data Format Header
+// readSegments splits an XG stream into its segments: the GDF header, the
+// optional thumbnail, then the files of the zlib archive. checkMagic rejects
+// a game file without the "DMLI" signature.
+//
+// Some files carry no archive at all: after the GDF header (with no
+// thumbnail) comes the game file as a single zlib stream, without the
+// archive index and trailer. Such files are complete; read as an archive,
+// their last bytes give a nonsense trailer, hence a seek error or a failed
+// archive CRC. They are recognised after the archive read fails, and only
+// when the stream inflates to a game file ending exactly at end of file.
+func readSegments(r io.ReadSeeker, checkMagic bool) ([]*Segment, error) {
 	gdfHeader := &GameDataFormatHdrRecord{}
-	err = gdfHeader.FromStream(file)
-	if err != nil {
+	if err := gdfHeader.FromStream(r); err != nil {
 		return nil, fmt.Errorf("not a game data format file: %v", err)
 	}
 
-	// Read the full GDF header segment
-	file.Seek(0, io.SeekStart)
-	gdfData := make([]byte, gdfHeader.HeaderSize)
-	_, err = io.ReadFull(file, gdfData)
-	if err != nil {
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return nil, err
 	}
+	gdfData := make([]byte, gdfHeader.HeaderSize)
+	if _, err := io.ReadFull(r, gdfData); err != nil {
+		return nil, err
+	}
+	segments := []*Segment{{Type: SegmentGDFHdr, Data: gdfData}}
 
-	segments = append(segments, &Segment{
-		Type: SegmentGDFHdr,
-		Data: gdfData,
-	})
-
-	// Extract thumbnail if present
 	if gdfHeader.ThumbnailSize > 0 {
-		file.Seek(gdfHeader.ThumbnailOffset, io.SeekCurrent)
+		r.Seek(gdfHeader.ThumbnailOffset, io.SeekCurrent)
 		imgData := make([]byte, gdfHeader.ThumbnailSize)
-		_, err = io.ReadFull(file, imgData)
-		if err != nil {
+		if _, err := io.ReadFull(r, imgData); err != nil {
 			return nil, err
 		}
-
-		segments = append(segments, &Segment{
-			Type: SegmentGDFImage,
-			Data: imgData,
-		})
+		segments = append(segments, &Segment{Type: SegmentGDFImage, Data: imgData})
 	}
 
-	// Get archive object
-	archiveObj, err := NewZlibArchive(file)
+	dataStart, err := r.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return nil, err
 	}
 
-	// Process all files in the archive
+	archiveObj, err := NewZlibArchive(r)
+	if err != nil {
+		if gdfHeader.ThumbnailSize == 0 {
+			if data, ok := bareGameFile(r, dataStart); ok {
+				return append(segments, &Segment{
+					Type:     SegmentXGGameFile,
+					Data:     data,
+					Filename: "temp.xg",
+				}), nil
+			}
+		}
+		return nil, err
+	}
+
 	for _, fileRec := range archiveObj.ArcRegistry {
 		data, err := archiveObj.GetArchiveFile(&fileRec)
 		if err != nil {
@@ -125,16 +137,8 @@ func (imp *Import) GetFileSegments() ([]*Segment, error) {
 		}
 
 		segmentType := XGFileMap[fileRec.Name]
-
-		// Verify magic number for game file
-		if segmentType == SegmentXGGameFile {
-			if len(data) > XGGameHdrLen+4 {
-				magicBytes := data[XGGameHdrLen : XGGameHdrLen+4]
-				magic := string(magicBytes)
-				if magic != "DMLI" {
-					return nil, fmt.Errorf("not a valid XG gamefile")
-				}
-			}
+		if checkMagic && segmentType == SegmentXGGameFile && !hasGameFileMagic(data) && len(data) > XGGameHdrLen+4 {
+			return nil, fmt.Errorf("not a valid XG gamefile")
 		}
 
 		segments = append(segments, &Segment{
@@ -145,6 +149,42 @@ func (imp *Import) GetFileSegments() ([]*Segment, error) {
 	}
 
 	return segments, nil
+}
+
+// gameFileRecordSize is the fixed size of every record of an XG game file.
+const gameFileRecordSize = 2560
+
+// hasGameFileMagic reports whether data carries the game file signature.
+func hasGameFileMagic(data []byte) bool {
+	return len(data) >= XGGameHdrLen+4 && string(data[XGGameHdrLen:XGGameHdrLen+4]) == "DMLI"
+}
+
+// bareGameFile reads, from offset start, a game file stored as one zlib
+// stream with no archive around it. It accepts the stream only if it ends
+// exactly at end of file and inflates to whole records with the game file
+// signature, so a genuinely corrupt archive still reports its own error.
+func bareGameFile(r io.ReadSeeker, start int64) ([]byte, bool) {
+	if _, err := r.Seek(start, io.SeekStart); err != nil {
+		return nil, false
+	}
+	raw, err := io.ReadAll(r)
+	if err != nil {
+		return nil, false
+	}
+	br := bytes.NewReader(raw)
+	zr, err := zlib.NewReader(br)
+	if err != nil {
+		return nil, false
+	}
+	defer zr.Close()
+	data, err := io.ReadAll(zr)
+	if err != nil || br.Len() != 0 {
+		return nil, false
+	}
+	if len(data) == 0 || len(data)%gameFileRecordSize != 0 || !hasGameFileMagic(data) {
+		return nil, false
+	}
+	return data, true
 }
 
 // ParseGameFile parses the game file segment and returns records

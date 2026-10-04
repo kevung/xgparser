@@ -217,6 +217,19 @@ Contributions are welcome! Please ensure:
 - Backward compatibility is maintained
 ````
 
+## Changelog
+
+### v1.5.0
+
+- `MatchMetadata` carries the XG match header fields `Player1Elo`, `Player2Elo`,
+  `Player1Experience`, `Player2Experience`, `Transcriber`, `Jacoby`, `Beaver`,
+  `MatchHeaderComment` and `MatchFooterComment` (additive, no API break).
+- Fix: `ProductVersion` no longer receives the GDF header title ("Played on <location>");
+  it stays empty for `.xg`/`.xgp` files, which do not record the XG release.
+- Files whose game file follows the GDF header as a single zlib stream, without the
+  archive index and trailer, are now read instead of failing with
+  "seek: invalid argument" or "archive CRC check failed".
+
 ## Fixed Issues
 
 ### EngineStructBestMoveRecord - CubePos vs Cubepos ✅ COMPLETE

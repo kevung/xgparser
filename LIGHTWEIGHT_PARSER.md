@@ -122,11 +122,26 @@ type MatchMetadata struct {
     DateTime       string `json:"date_time"`
     MatchLength    int32  `json:"match_length"`
     EngineVersion  int32  `json:"engine_version"`   // File format version (e.g., 30)
-    ProductVersion string `json:"product_version"` // XG product version (e.g., "eXtreme Gammon 2.19.1")
+    ProductVersion string `json:"product_version"` // XG product version - XGID text only
+    MET            string `json:"met"`             // Match equity table - XGID text only
+
+    // From the XG binary match header (since v1.5.0)
+    Player1Elo         float64 `json:"player1_elo,omitempty"`
+    Player2Elo         float64 `json:"player2_elo,omitempty"`
+    Player1Experience  int32   `json:"player1_experience,omitempty"`
+    Player2Experience  int32   `json:"player2_experience,omitempty"`
+    Transcriber        string  `json:"transcriber,omitempty"`
+    Jacoby             bool    `json:"jacoby,omitempty"`
+    Beaver             bool    `json:"beaver,omitempty"`
+    MatchHeaderComment string  `json:"match_header_comment,omitempty"`
+    MatchFooterComment string  `json:"match_footer_comment,omitempty"`
 }
 ```
 The `EngineVersion` field indicates the XG file format version (typically 30 for recent versions).
-The `ProductVersion` field contains the XG software version string if available in the file.
+The `ProductVersion` field is set only for XGID text exports: an `.xg`/`.xgp` file does not
+record the eXtreme Gammon release that wrote it (the GDF header's title, "Played on
+<location>", is not a version). XG writes a rating and an experience for every player,
+1600 and 0 when the player has no profile.
 
 #### Game
 ```go
