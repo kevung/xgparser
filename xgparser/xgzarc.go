@@ -15,12 +15,67 @@ import (
 	"bytes"
 	"compress/zlib"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
 )
 
 const maxBufSize = 32768
+
+// MaxDecompressedSize caps the size of any segment read from an XG file:
+// inflated zlib data, stored data and header blocks alike. It guards a
+// reader of untrusted files against decompression bombs and oversized
+// allocations. The largest segment of a real match seen on the BMAB europe
+// corpus (33 343 files) is 6 259 200 bytes (about 6 MiB, a game file); the
+// default of 128 MiB leaves a margin of about x21. Set it before parsing;
+// it is read without locking.
+var MaxDecompressedSize int64 = 128 << 20
+
+// ErrDecompressionLimit is matched by errors.Is on a SizeLimitError.
+var ErrDecompressionLimit = errors.New("xgparser: segment exceeds MaxDecompressedSize")
+
+// SizeLimitError reports a segment larger than MaxDecompressedSize, or a
+// size field that is negative.
+type SizeLimitError struct {
+	What  string // which segment: "zlib stream", "stored file", "GDF header", "thumbnail"
+	Size  int64  // declared size, or Limit+1 when inflation went past the limit
+	Limit int64
+}
+
+func (e *SizeLimitError) Error() string {
+	return fmt.Sprintf("xgparser: %s of %d bytes exceeds the limit of %d bytes", e.What, e.Size, e.Limit)
+}
+
+// Is makes errors.Is(err, ErrDecompressionLimit) true.
+func (e *SizeLimitError) Is(target error) bool { return target == ErrDecompressionLimit }
+
+// checkSize rejects a declared size that is negative or above the limit.
+func checkSize(what string, size int64) error {
+	if size < 0 || size > MaxDecompressedSize {
+		return &SizeLimitError{What: what, Size: size, Limit: MaxDecompressedSize}
+	}
+	return nil
+}
+
+// inflate decompresses one zlib stream from r, refusing to produce more than
+// MaxDecompressedSize bytes.
+func inflate(r io.Reader) ([]byte, error) {
+	zr, err := zlib.NewReader(r)
+	if err != nil {
+		return nil, err
+	}
+	defer zr.Close()
+	limit := MaxDecompressedSize
+	data, err := io.ReadAll(io.LimitReader(zr, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, &SizeLimitError{What: "zlib stream", Size: limit + 1, Limit: limit}
+	}
+	return data, nil
+}
 
 // ArchiveRecord represents the archive metadata
 type ArchiveRecord struct {
@@ -110,7 +165,7 @@ func (za *ZlibArchive) getArchiveIndex() error {
 	// Decompress index
 	indexData, err := za.extractSegment(za.ArcRec.CompressedRegistry != 0, 0)
 	if err != nil {
-		return fmt.Errorf("error extracting archive index: %v", err)
+		return fmt.Errorf("error extracting archive index: %w", err)
 	}
 
 	// Read file records from index
@@ -169,24 +224,14 @@ func (za *ZlibArchive) getArchiveIndex() error {
 // extractSegment extracts a compressed or uncompressed segment
 func (za *ZlibArchive) extractSegment(isCompressed bool, numBytes int32) ([]byte, error) {
 	if isCompressed {
-		// Decompress the segment
-		r, err := zlib.NewReader(za.stream)
-		if err != nil {
-			return nil, err
-		}
-		defer r.Close()
-
-		var buf bytes.Buffer
-		_, err = io.Copy(&buf, r)
-		if err != nil {
-			return nil, err
-		}
-
-		return buf.Bytes(), nil
+		return inflate(za.stream)
 	} else {
 		// Read uncompressed segment
 		if numBytes == 0 {
 			return nil, fmt.Errorf("numBytes must be specified for uncompressed segments")
+		}
+		if err := checkSize("stored file", int64(numBytes)); err != nil {
+			return nil, err
 		}
 
 		data := make([]byte, numBytes)
@@ -208,7 +253,7 @@ func (za *ZlibArchive) GetArchiveFile(filerec *FileRecord) ([]byte, error) {
 
 	data, err := za.extractSegment(filerec.Compressed == 0, filerec.CSize)
 	if err != nil {
-		return nil, fmt.Errorf("error extracting archived file: %v", err)
+		return nil, fmt.Errorf("error extracting archived file: %w", err)
 	}
 
 	// Verify CRC

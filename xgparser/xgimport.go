@@ -13,7 +13,7 @@ package xgparser
 
 import (
 	"bytes"
-	"compress/zlib"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -96,6 +96,9 @@ func readSegments(r io.ReadSeeker, checkMagic bool) ([]*Segment, error) {
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return nil, err
 	}
+	if err := checkSize("GDF header", int64(gdfHeader.HeaderSize)); err != nil {
+		return nil, err
+	}
 	gdfData := make([]byte, gdfHeader.HeaderSize)
 	if _, err := io.ReadFull(r, gdfData); err != nil {
 		return nil, err
@@ -104,6 +107,9 @@ func readSegments(r io.ReadSeeker, checkMagic bool) ([]*Segment, error) {
 
 	if gdfHeader.ThumbnailSize > 0 {
 		r.Seek(gdfHeader.ThumbnailOffset, io.SeekCurrent)
+		if err := checkSize("thumbnail", int64(gdfHeader.ThumbnailSize)); err != nil {
+			return nil, err
+		}
 		imgData := make([]byte, gdfHeader.ThumbnailSize)
 		if _, err := io.ReadFull(r, imgData); err != nil {
 			return nil, err
@@ -119,7 +125,11 @@ func readSegments(r io.ReadSeeker, checkMagic bool) ([]*Segment, error) {
 	archiveObj, err := NewZlibArchive(r)
 	if err != nil {
 		if gdfHeader.ThumbnailSize == 0 {
-			if data, ok := bareGameFile(r, dataStart); ok {
+			data, ok, bareErr := bareGameFile(r, dataStart)
+			if bareErr != nil {
+				return nil, bareErr
+			}
+			if ok {
 				return append(segments, &Segment{
 					Type:     SegmentXGGameFile,
 					Data:     data,
@@ -163,28 +173,27 @@ func hasGameFileMagic(data []byte) bool {
 // stream with no archive around it. It accepts the stream only if it ends
 // exactly at end of file and inflates to whole records with the game file
 // signature, so a genuinely corrupt archive still reports its own error.
-func bareGameFile(r io.ReadSeeker, start int64) ([]byte, bool) {
+// A stream inflating past MaxDecompressedSize is reported as such.
+func bareGameFile(r io.ReadSeeker, start int64) ([]byte, bool, error) {
 	if _, err := r.Seek(start, io.SeekStart); err != nil {
-		return nil, false
+		return nil, false, nil
 	}
 	raw, err := io.ReadAll(r)
 	if err != nil {
-		return nil, false
+		return nil, false, nil
 	}
 	br := bytes.NewReader(raw)
-	zr, err := zlib.NewReader(br)
-	if err != nil {
-		return nil, false
+	data, err := inflate(br)
+	if errors.Is(err, ErrDecompressionLimit) {
+		return nil, false, err
 	}
-	defer zr.Close()
-	data, err := io.ReadAll(zr)
 	if err != nil || br.Len() != 0 {
-		return nil, false
+		return nil, false, nil
 	}
 	if len(data) == 0 || len(data)%gameFileRecordSize != 0 || !hasGameFileMagic(data) {
-		return nil, false
+		return nil, false, nil
 	}
-	return data, true
+	return data, true, nil
 }
 
 // ParseGameFile parses the game file segment and returns records

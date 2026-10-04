@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/zlib"
 	"encoding/binary"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -214,4 +215,52 @@ func TestParseXGEmptyCommentKeepsIndices(t *testing.T) {
 	if got := m.Metadata.MatchFooterComment; got != original[0] {
 		t.Errorf("comment 1 = %q, want %q", got, original[0])
 	}
+}
+
+func withLimit(t *testing.T, limit int64) {
+	t.Helper()
+	old := MaxDecompressedSize
+	MaxDecompressedSize = limit
+	t.Cleanup(func() { MaxDecompressedSize = old })
+}
+
+func wantLimitError(t *testing.T, label string, err error) {
+	t.Helper()
+	var sle *SizeLimitError
+	if !errors.Is(err, ErrDecompressionLimit) || !errors.As(err, &sle) {
+		t.Errorf("%s: err = %v, want a SizeLimitError", label, err)
+	}
+}
+
+// A zlib stream inflating past the cap is refused, without inflating it all.
+func TestDecompressionBombRefused(t *testing.T) {
+	segs := fixtureSegments(t, "test.xg")
+	withLimit(t, 1<<20)
+	hdr := append([]byte(nil), segmentOf(t, segs, SegmentGDFHdr).Data...)
+	for i := 12; i < 24; i++ {
+		hdr[i] = 0
+	}
+	var buf bytes.Buffer
+	buf.Write(hdr)
+	zw, _ := zlib.NewWriterLevel(&buf, zlib.BestCompression)
+	zw.Write(make([]byte, 64<<20)) // 64 MiB of zeros, a few dozen KiB compressed
+	zw.Close()
+
+	_, err := ParseXGFromReader(bytes.NewReader(buf.Bytes()))
+	wantLimitError(t, "bare stream", err)
+}
+
+// The cap also applies to the files of a regular archive.
+func TestArchiveSegmentOverLimitRefused(t *testing.T) {
+	withLimit(t, 64<<10)
+	_, err := ParseXGFromFile(filepath.Join("testdata", "test.xg"))
+	wantLimitError(t, "archive", err)
+}
+
+// A size field outside the cap is refused before allocating.
+func TestOversizedHeaderFieldRefused(t *testing.T) {
+	raw := bareContainer(t, "test.xg")
+	binary.LittleEndian.PutUint32(raw[8:], 0x7FFFFFFF) // GDF HeaderSize
+	_, err := ParseXGFromReader(bytes.NewReader(raw))
+	wantLimitError(t, "GDF header size", err)
 }

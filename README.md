@@ -225,12 +225,16 @@ Contributions are welcome! Please ensure:
   `Player1Experience`, `Player2Experience`, `Transcriber`, `Jacoby`, `Beaver`,
   `MatchHeaderComment` and `MatchFooterComment` (additive, no API break).
 - Fix: `ProductVersion` no longer receives the GDF header title ("Played on <location>");
-  it stays empty for `.xg`/`.xgp` files, which do not record the XG release.
+  `ProductVersion` is now always empty for `.xg`/`.xgp` files, which do not record the
+  XG release; it is set only by the XGID text parsers.
 - Files whose game file follows the GDF header as a single zlib stream, without the
   archive index and trailer, are now read instead of failing with
   "seek: invalid argument" or "archive CRC check failed".
 - Fix: an empty comment in the comment segment keeps its index; the comments after it
   no longer shift onto the wrong move, cube decision or match header.
+- Decompressed and stored segments are capped by `MaxDecompressedSize` (default 128 MiB,
+  about x21 the largest segment of the BMAB europe corpus) against decompression bombs;
+  beyond it, parsing fails with a `*SizeLimitError` (`errors.Is(err, ErrDecompressionLimit)`).
 
 ## Fixed Issues
 
