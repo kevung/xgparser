@@ -229,6 +229,8 @@ Contributions are welcome! Please ensure:
 - Files whose game file follows the GDF header as a single zlib stream, without the
   archive index and trailer, are now read instead of failing with
   "seek: invalid argument" or "archive CRC check failed".
+- Fix: an empty comment in the comment segment keeps its index; the comments after it
+  no longer shift onto the wrong move, cube decision or match header.
 
 ## Fixed Issues
 

@@ -185,3 +185,33 @@ func TestParseXGTruncatedBareContainerRefused(t *testing.T) {
 		}
 	}
 }
+
+// XG indexes comments by their position in the comment segment, so an empty
+// comment still holds its index: the one after it must not move up.
+func TestParseXGEmptyCommentKeepsIndices(t *testing.T) {
+	segs := fixtureSegments(t, "match_with_comment.xg")
+	commentSeg := segmentOf(t, segs, SegmentXGComment)
+	original := parseCommentSegment(commentSeg.Data)
+	if len(original) < 2 || original[0] == "" || original[1] == "" {
+		t.Fatalf("fixture needs two non-empty comments, got %q", original)
+	}
+	// An empty comment at index 0 shifts every stored comment by one.
+	commentSeg.Data = append([]byte("\r\n"), commentSeg.Data...)
+
+	game := segmentOf(t, segs, SegmentXGGameFile)
+	data := append([]byte(nil), game.Data...)
+	binary.LittleEndian.PutUint32(data[offCommentHeaderMatch:], 0)
+	binary.LittleEndian.PutUint32(data[offCommentFooterMatch:], 1)
+	game.Data = data
+
+	m, err := ParseXG(segs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Metadata.MatchHeaderComment; got != "" {
+		t.Errorf("comment 0 = %q, want empty", got)
+	}
+	if got := m.Metadata.MatchFooterComment; got != original[0] {
+		t.Errorf("comment 1 = %q, want %q", got, original[0])
+	}
+}

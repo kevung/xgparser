@@ -253,16 +253,16 @@ func commentAt(comments []string, i int32) string {
 // parseCommentSegment parses the XG comment segment (temp.xgc) into a slice of plain text strings.
 // The comment segment is an RTF text file where individual comments are separated by CRLF (\r\n).
 // Within each comment, \x01\x02 sequences represent actual CRLF line breaks.
+// Records refer to comments by index, so an empty comment keeps its slot;
+// only the empty string after the final CRLF is not a comment.
 func parseCommentSegment(data []byte) []string {
-	text := string(data)
-	// Split by CRLF to get individual comments
-	rawComments := strings.Split(text, "\r\n")
+	rawComments := strings.Split(string(data), "\r\n")
+	if n := len(rawComments); rawComments[n-1] == "" {
+		rawComments = rawComments[:n-1]
+	}
 
-	var comments []string
+	comments := make([]string, 0, len(rawComments))
 	for _, raw := range rawComments {
-		if len(raw) == 0 {
-			continue
-		}
 		// Replace \x01\x02 with real newlines within the comment
 		raw = strings.ReplaceAll(raw, "\x01\x02", "\r\n")
 		// Strip RTF formatting to get plain text
