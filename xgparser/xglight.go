@@ -95,7 +95,7 @@ type CheckerMove struct {
 	Position     Position          `json:"position"`      // Position before the move
 	ActivePlayer int32             `json:"active_player"` // Player making the move
 	Dice         [2]int32          `json:"dice"`          // Dice rolled
-	PlayedMove   [8]int32          `json:"played_move"`   // The move that was played (25=bar, 1-24=points, -2=bear off, -1=unused)
+	PlayedMove   [8]int32          `json:"played_move"`   // The move that was played (25=bar, 1-24=points, -1=unused; a "to" <= 0 is a bear-off: -1 or from-die+1, kept for content hashes)
 	Analysis     []CheckerAnalysis `json:"analysis"`      // Analysis of possible moves
 }
 
@@ -540,6 +540,36 @@ func convertCubeEntry(c *CubeEntry) *CubeMove {
 	return move
 }
 
+// decodeXGMove converts a move as XG stores it to the output format
+// (1-24 = points, 25 = bar, -2 = bear off, -1 = unused).
+//
+// XG stores up to four (from, to) pairs with 0-based points and 24 for the
+// bar. A pair whose "from" is -1 ends the move; the slots after it are not
+// cleared and may hold anything. A negative "to" is a bear-off: XG writes
+// either -1 or from-die (-1, -2, -3...), in the played move as in the
+// candidates, so -1 in a "to" slot is never "end of move".
+func decodeXGMove(raw [8]int32) [8]int8 {
+	out := [8]int8{-1, -1, -1, -1, -1, -1, -1, -1}
+	for j := 0; j < 8; j += 2 {
+		from, to := raw[j], raw[j+1]
+		if from < 0 {
+			break
+		}
+		out[j] = xgPointToOutput(from)
+		if to < 0 {
+			out[j+1] = -2
+		} else {
+			out[j+1] = xgPointToOutput(to)
+		}
+	}
+	return out
+}
+
+// xgPointToOutput maps an XG 0-based point (24 = bar) to 1-24 / 25 = bar.
+func xgPointToOutput(p int32) int8 {
+	return int8(p + 1)
+}
+
 // convertMoveEntry converts a full MoveEntry to CheckerMove
 func convertMoveEntry(m *MoveEntry) *CheckerMove {
 	// Build initial position
@@ -555,19 +585,20 @@ func convertMoveEntry(m *MoveEntry) *CheckerMove {
 		position = swapPosition(position)
 	}
 
-	// Convert moves from XG internal format to desired output format
-	// XG internal: -1=unused, 0-23=points (0-based), 24=bar, -2=bear off
-	// We output: -1=unused, 1-24=points (1-based), 25=bar, -2=bear off
+	// PlayedMove keeps its historical encoding: off is -1 or from-die+1, not
+	// the documented -2. Consumers hash this array to recognise a match they
+	// already stored, so normalising it would make every match with a
+	// bear-off look new. Read it as: a "to" of 0 or less is off.
 	var playedMove [8]int32
 	for i := 0; i < 8; i++ {
 		if m.Moves[i] == -1 {
-			playedMove[i] = -1 // unused
+			playedMove[i] = -1
 		} else if m.Moves[i] == -2 {
-			playedMove[i] = -2 // bear off
+			playedMove[i] = -2
 		} else if m.Moves[i] == 24 {
-			playedMove[i] = 25 // bar (24 -> 25)
+			playedMove[i] = 25
 		} else {
-			playedMove[i] = m.Moves[i] + 1 // points: add 1 to convert from 0-based to 1-based (0->1, 1->2, ..., 23->24)
+			playedMove[i] = m.Moves[i] + 1
 		}
 	}
 
@@ -592,23 +623,11 @@ func convertMoveEntry(m *MoveEntry) *CheckerMove {
 		}
 
 		for i := 0; i < numMoves; i++ {
-			// Convert move from XG internal format to desired output format
-			// XG internal: -1=end of move/unused, 0-23=points (0-based), 24=bar, -2=bear off
-			// We output: -1=unused, 1-24=points (1-based), 25=bar, -2=bear off
-			var moveArray [8]int8
-			endOfMove := false
-			for j := 0; j < 8; j++ {
-				if m.DataMoves.Moves[i][j] == -1 || endOfMove {
-					moveArray[j] = -1 // unused (and everything after first -1)
-					endOfMove = true
-				} else if m.DataMoves.Moves[i][j] == -2 {
-					moveArray[j] = -2 // bear off
-				} else if m.DataMoves.Moves[i][j] == 24 {
-					moveArray[j] = 25 // bar (24 -> 25)
-				} else {
-					moveArray[j] = m.DataMoves.Moves[i][j] + 1 // points: add 1 to convert from 0-based to 1-based (0->1, 1->2, ..., 23->24)
-				}
+			var raw [8]int32
+			for j, v := range m.DataMoves.Moves[i] {
+				raw[j] = int32(v)
 			}
+			moveArray := decodeXGMove(raw)
 
 			analysisPosition := m.DataMoves.PosPlayed[i]
 
